@@ -32,8 +32,8 @@ struct GanZhiTodoShortcuts: AppShortcutsProvider {
             phrases: [
                 "在\(.applicationName)记一条待办",
                 "在\(.applicationName)语音记待办",
-                "小记一下",
-                "语音记待办"
+                "\(.applicationName)小记一下",
+                "\(.applicationName)语音记待办"
             ],
             shortTitle: "语音记待办",
             systemImageName: "waveform"
