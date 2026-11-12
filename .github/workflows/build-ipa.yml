@@ -1,0 +1,93 @@
+name: Build IPA
+
+# 用途：在没有 Xcode 的 Mac 上，用 GitHub 的 macOS 机器编译出 .ipa
+# 触发：进入仓库 Actions 页 → 左侧 "Build IPA" → 右侧 "Run workflow"
+on:
+  workflow_dispatch:
+    inputs:
+      strip_app_group:
+        description: "移除 App Group（用免费 Apple ID 侧载时保持 true）"
+        type: boolean
+        default: true
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    # macOS 26 镜像自带 Xcode 26，可编译 iOS 26 SDK
+    runs-on: macos-26
+    timeout-minutes: 40
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 选择最新 Xcode
+        run: |
+          echo "可用 Xcode："
+          ls -d /Applications/Xcode*.app || true
+          LATEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          if [ -n "$LATEST" ]; then sudo xcode-select -s "$LATEST"; fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 处理 entitlements（免费账号无 App Group 权限）
+        run: |
+          SHOULD_STRIP="true"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHOULD_STRIP="${{ inputs.strip_app_group }}"
+          fi
+
+          if [ "$SHOULD_STRIP" = "true" ]; then
+            echo "→ 移除 App Group 声明，避免免费签名失败（小组件将读不到待办数据）"
+            for f in GanZhiTodo/GanZhiTodo.entitlements GanZhiTodoWidget/GanZhiTodoWidget.entitlements; do
+              /usr/libexec/PlistBuddy -c "Delete :com.apple.security.application-groups" "$f" 2>/dev/null || true
+              echo "--- $f"; cat "$f"
+            done
+          else
+            echo "→ 保留 App Group（需要付费开发者账号）"
+          fi
+
+      - name: 编译（未签名）
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project GanZhiTodo.xcodeproj \
+            -scheme GanZhiTodo \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/GanZhiTodo.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            ENABLE_BITCODE=NO
+
+      - name: 打包 ipa
+        run: |
+          APP_PATH="build/GanZhiTodo.xcarchive/Products/Applications/GanZhiTodo.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "未找到 .app，列出 archive 内容排查："
+            find build/GanZhiTodo.xcarchive -maxdepth 4 | head -40
+            exit 1
+          fi
+          rm -rf Payload GanZhiTodo.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry GanZhiTodo.ipa Payload
+          echo "产物："
+          unzip -l GanZhiTodo.ipa | head -15
+          du -h GanZhiTodo.ipa
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: GanZhiTodo-unsigned-ipa
+          path: GanZhiTodo.ipa
+          retention-days: 30
