@@ -290,12 +290,10 @@ struct VoiceCaptureView: View {
         svc.onPartialResult = { text in
             DispatchQueue.main.async { self.transcript = text }
         }
-        svc.onFinalResult = { [weak self] text in
-            guard let self else { return }
+        svc.onFinalResult = { text in
             DispatchQueue.main.async { self.finalize(text) }
         }
-        svc.onError = { [weak self] message in
-            guard let self else { return }
+        svc.onError = { message in
             DispatchQueue.main.async {
                 if self.transcript.isEmpty {
                     self.phase = .error(message)
