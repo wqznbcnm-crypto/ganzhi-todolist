@@ -15,7 +15,9 @@ on:
 jobs:
   build:
     # macOS 26 镜像自带 Xcode 26，可编译 iOS 26 SDK
-    runs-on: macos-26
+    # 使用 Intel 队列：macOS arm64 队列容量紧张易分配失败；Intel 队列可用，
+    # 编译机架构不影响产物，ipa 仍是标准 arm64 iOS 二进制
+    runs-on: macos-26-intel
     timeout-minutes: 40
 
     steps:
