@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>干支日历 · 界面预览</title>
+<style>
+  :root{
+    --bg:#ffffff;
+    --ink:#141414;
+    --gray:#9a9a9a;
+    --gray2:#b9b9b9;
+    --hair:rgba(0,0,0,.07);
+    --soft:rgba(0,0,0,.035);
+    --accent:#b03a2e;
+    --serif:"Songti SC","Noto Serif CJK SC",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:#eceae5;font-family:var(--sans);color:var(--ink);
+    padding:36px 24px;display:flex;flex-direction:column;gap:28px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page-head{max-width:1080px;margin:0 auto;width:100%}
+  .page-head h1{font-size:22px;font-weight:700;letter-spacing:.5px}
+  .page-head p{color:var(--gray);font-size:13px;margin-top:6px;line-height:1.6}
+  .stage{display:flex;flex-wrap:wrap;gap:40px;justify-content:center;align-items:flex-start}
+
+  /* 手机外框 */
+  .phone{
+    width:320px;background:var(--bg);border-radius:44px;
+    box-shadow:0 24px 60px rgba(0,0,0,.16), 0 0 0 1px rgba(0,0,0,.05);
+    overflow:hidden;padding:0;position:relative;
+  }
+  .phone .statusbar{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:14px 26px 8px;font-size:12px;font-weight:600;color:var(--ink);
+  }
+  .phone .screen{padding:6px 20px 18px}
+  .phone .title-note{position:absolute;top:26px;left:50%;transform:translateX(-50%);
+    width:96px;height:26px;background:var(--ink);border-radius:13px}
+
+  .caption{text-align:center;font-size:13px;color:#777;margin-top:16px;letter-spacing:.3px}
+  .caption b{color:#333}
+
+  /* 通用 */
+  .hwrap{display:flex;align-items:center;gap:6px;justify-content:space-between}
+  .m-title{font-size:26px;font-weight:800;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+  .sub{font-family:var(--serif);color:var(--gray);font-size:12.5px;margin-top:3px}
+  .chip-today{background:var(--accent);color:#fff;font-size:10px;font-weight:600;
+    padding:2px 8px;border-radius:99px;margin-left:8px;vertical-align:3px}
+  .navbtn{width:34px;height:34px;border-radius:50%;background:var(--soft);color:#888;
+    display:flex;align-items:center;justify-content:center;font-size:13px;cursor:default}
+
+  /* 四柱条 */
+  .pillars{background:var(--soft);border-radius:16px;padding:16px;margin-top:16px}
+  .pillars .row{display:flex;align-items:flex-end;justify-content:space-between}
+  .pil{display:flex;gap:8px;align-items:flex-end}
+  .pil .cell{display:flex;flex-direction:column;align-items:center;gap:2px}
+  .pil .cell .lb{font-size:8.5px;color:var(--gray2);letter-spacing:1px}
+  .pil .cell .tz{font-family:var(--serif);font-size:16px}
+  .pil .dot{color:var(--gray2);font-size:11px;padding-bottom:2px}
+  .now{text-align:right}
+  .now .t{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+  .now .s{font-size:9.5px;color:var(--gray);margin-top:2px}
+  .scale{display:flex;gap:2px;margin-top:14px}
+  .scale .seg{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px}
+  .scale .bar{width:100%;height:3px;border-radius:3px;background:var(--hair)}
+  .scale .seg.on .bar{height:4px;background:var(--ink)}
+  .scale .seg .z{font-size:8px;color:var(--gray);font-family:var(--serif)}
+  .scale .seg.on .z{color:var(--ink);font-weight:700}
+
+  /* 星期 */
+  .wd{display:grid;grid-template-columns:repeat(7,1fr);margin-top:16px}
+  .wd span{text-align:center;font-size:10.5px;color:var(--gray);font-weight:600}
+
+  /* 日历格 */
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);row-gap:8px;margin-top:6px}
+  .day{height:52px;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:default}
+  .day .num{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:15.5px;font-weight:600;font-variant-numeric:tabular-nums}
+  .day .gz{font-family:var(--serif);font-size:8px;color:var(--gray);line-height:1}
+  .day .term{font-size:8px;color:var(--accent);font-weight:600;line-height:1}
+  .day .dots{display:flex;gap:2px;height:4px;margin-top:1px}
+  .day .dots i{width:3.5px;height:3.5px;border-radius:50%;background:var(--accent)}
+  .day.today .num{background:var(--ink);color:#fff;font-weight:700}
+
+  /* 摘要卡 */
+  .card{background:var(--soft);border-radius:16px;padding:14px;margin-top:18px}
+  .card .chead{display:flex;align-items:baseline;justify-content:space-between}
+  .card .chead .l{font-size:14.5px;font-weight:700}
+  .card .chead .l span{font-family:var(--serif);font-size:10.5px;color:var(--gray);font-weight:400;margin-left:6px}
+  .card .chead .all{font-size:11px;color:var(--gray)}
+  .trow{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--hair)}
+  .trow:last-child{border-bottom:none;padding-bottom:0}
+  .trow .ck{width:18px;height:18px;border:1.5px solid #cfcfcf;border-radius:50%;margin-top:2px;flex:none}
+  .trow .ck.done{background:var(--accent);border-color:var(--accent);position:relative}
+  .trow .ck.done::after{content:"";position:absolute;left:5px;top:2px;width:5px;height:9px;
+    border:solid #fff;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+  .trow .tt{font-size:13.5px;line-height:1.35}
+  .trow .tt.done{color:var(--gray);text-decoration:line-through}
+  .trow .meta{font-size:10px;color:var(--gray);margin-top:3px;display:flex;gap:8px}
+  .trow .chip{background:rgba(176,58,46,.08);color:var(--accent);border-radius:5px;padding:1px 5px;font-size:9.5px}
+
+  /* 底部操作栏 */
+  .bar{display:flex;gap:10px;padding:10px 20px 14px;background:var(--bg);
+    border-top:1px solid var(--hair);position:sticky;bottom:0}
+  .btn{flex:1;height:46px;border-radius:23px;display:flex;align-items:center;justify-content:center;
+    gap:6px;font-size:14px;font-weight:600;cursor:default}
+  .btn.ghost{background:var(--soft);color:var(--ink)}
+  .btn.primary{background:var(--ink);color:#fff}
+
+  /* 详情页 */
+  .nav{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 12px}
+  .nav .back{color:var(--accent);font-size:15px}
+  .nav .nt{text-align:center}
+  .nav .nt .a{font-size:15px;font-weight:700}
+  .nav .nt .b{font-family:var(--serif);font-size:9.5px;color:var(--gray);margin-top:1px}
+  .nav .add{font-size:17px;color:var(--accent)}
+
+  /* 语音页 */
+  .mic-wrap{display:flex;align-items:center;justify-content:center;padding:30px 0 8px;position:relative}
+  .ring{position:absolute;width:120px;height:120px;border-radius:50%;border:1.5px solid var(--accent);
+    opacity:.25;animation:pulse 2.2s ease-in-out infinite}
+  .ring.r2{width:152px;height:152px;opacity:.15;animation-delay:.5s}
+  @keyframes pulse{0%,100%{transform:scale(.92)}50%{transform:scale(1.14)}}
+  .mic{width:88px;height:88px;border-radius:50%;background:var(--accent);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:30px}
+  .transcript{text-align:center;font-size:18px;line-height:1.5;color:var(--ink);
+    background:var(--soft);border-radius:16px;padding:16px;margin-top:14px}
+  .transcript small{display:block;font-size:10px;color:var(--gray);margin-top:8px}
+  .corr{background:var(--soft);border-radius:16px;padding:14px;margin-top:14px;text-align:left}
+  .corr .lab{font-size:10.5px;color:var(--gray);font-weight:600;margin-bottom:6px}
+  .corr .field{font-size:15px;border-bottom:1px solid var(--hair);padding-bottom:6px}
+  .corr .row2{display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-size:13px}
+  .toggle{width:42px;height:24px;border-radius:12px;background:var(--accent);position:relative}
+  .toggle::after{content:"";position:absolute;right:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .chips span{font-size:10.5px;padding:4px 10px;border-radius:99px;background:rgba(0,0,0,.06)}
+  .chips span.on{background:var(--ink);color:#fff}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>干支日历 · 待办　界面预览</h1>
+  <p>iPhone 手机三屏示意。App 内全部中文，系统英文不受影响；干支信息统一用浅灰小字弱化，公历与待办为主视觉。</p>
+</div>
+
+<div class="stage">
+
+  <!-- ============ 屏幕 1：月历主视图 ============ -->
+  <div>
+    <div class="phone">
+      <div class="statusbar"><span>20:50</span><span style="display:flex;gap:4px">▂▄▆ 🔋</span></div>
+      <div class="title-note"></div>
+      <div class="screen" style="padding-top:22px">
+        <div class="hwrap">
+          <div>
+            <div class="m-title">2026年11月<span class="chip-today">今天</span></div>
+            <div class="sub">丙午年 · 己亥月</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <div class="navbtn">‹</div>
+            <div class="navbtn">›</div>
+          </div>
+        </div>
+
+        <div class="pillars">
+          <div class="row">
+            <div class="pil">
+              <div class="cell"><span class="lb">年</span><span class="tz">丙午</span></div>
+              <span class="dot">·</span>
+              <div class="cell"><span class="lb">月</span><span class="tz">己亥</span></div>
+              <span class="dot">·</span>
+              <div class="cell"><span class="lb">日</span><span class="tz">庚寅</span></div>
+              <span class="dot">·</span>
+              <div class="cell"><span class="lb">时</span><span class="tz">丙戌</span></div>
+            </div>
+            <div class="now">
+              <div class="t">20:50</div>
+              <div class="s">戌时 19:00–21:00</div>
+            </div>
+          </div>
+          <div class="scale" id="scale"></div>
+        </div>
+
+        <div class="wd"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+        <div class="grid" id="grid"></div>
+
+        <div class="card">
+          <div class="chead">
+            <div class="l">今天<span>周四 · 庚寅日</span></div>
+            <div class="all">全部 3 ›</div>
+          </div>
+          <div class="trow"><div class="ck"></div><div><div class="tt">产品评审会</div><div class="meta"><span>🕐 15:00</span><span class="chip">提前 30 分钟</span></div></div></div>
+          <div class="trow"><div class="ck"></div><div><div class="tt">看牙医</div><div class="meta"><span>🕐 19:00</span></div></div></div>
+          <div class="trow"><div class="ck done"></div><div><div class="tt done">写周报</div><div class="meta"><span>全天</span></div></div></div>
+        </div>
+      </div>
+      <div class="bar">
+        <div class="btn ghost">✎ 键盘录入</div>
+        <div class="btn primary">〰 语音录入</div>
+      </div>
+    </div>
+    <div class="caption"><b>月历主视图</b> · 四柱条 + 十二时辰刻度</div>
+  </div>
+
+  <!-- ============ 屏幕 2：单日详情 ============ -->
+  <div>
+    <div class="phone">
+      <div class="statusbar"><span>20:50</span><span style="display:flex;gap:4px">▂▄▆ 🔋</span></div>
+      <div class="title-note"></div>
+      <div class="screen" style="padding-top:22px">
+        <div class="nav">
+          <span class="back">‹ 返回</span>
+          <div class="nt"><div class="a">11月12日</div><div class="b">周四 · 庚寅日</div></div>
+          <span class="add">＋</span>
+        </div>
+        <div class="trow" style="padding-top:8px"><div class="ck"></div><div><div class="tt">产品评审会</div><div class="meta"><span>🕐 15:00</span><span class="chip">提前 30 分钟</span></div></div></div>
+        <div class="trow"><div class="ck"></div><div><div class="tt">看牙医</div><div class="meta"><span>🕐 19:00</span></div></div></div>
+        <div class="trow"><div class="ck done"></div><div><div class="tt done">写周报</div><div class="meta"><span>全天</span></div></div></div>
+        <div style="text-align:center;color:#bbb;font-size:12px;margin-top:26px">— 左滑可删除 —</div>
+      </div>
+      <div class="bar">
+        <div class="btn ghost">✎ 键盘录入</div>
+        <div class="btn primary">〰 语音录入</div>
+      </div>
+    </div>
+    <div class="caption"><b>单日详情</b> · 完整待办列表 · 左滑删除</div>
+  </div>
+
+  <!-- ============ 屏幕 3：语音录入 ============ -->
+  <div>
+    <div class="phone">
+      <div class="statusbar"><span>20:50</span><span style="display:flex;gap:4px">▂▄▆ 🔋</span></div>
+      <div class="title-note"></div>
+      <div class="screen" style="padding-top:22px">
+        <div class="nav">
+          <span class="back">关闭</span>
+          <div class="nt"><div class="a">语音记待办</div></div>
+          <span style="width:30px"></span>
+        </div>
+
+        <div class="mic-wrap">
+          <div class="ring"></div><div class="ring r2"></div>
+          <div class="mic">🎙</div>
+        </div>
+
+        <div class="transcript">
+          明天下午三点开产品评审会
+          <small>正在聆听… 说完会自动停止</small>
+        </div>
+
+        <div class="corr">
+          <div class="lab">事件</div>
+          <div class="field">开产品评审会</div>
+          <div class="row2"><span>设置时间</span><div class="toggle"></div></div>
+          <div class="row2" style="color:#555">11月13日 15:00</div>
+          <div class="lab" style="margin-top:14px">提醒</div>
+          <div class="chips"><span class="on">提前 30 分钟</span><span>准时</span><span>提前 1 小时</span><span>提前 1 天</span></div>
+        </div>
+      </div>
+      <div class="bar">
+        <div class="btn ghost">↺ 重新说</div>
+        <div class="btn primary">保存</div>
+      </div>
+    </div>
+    <div class="caption"><b>语音录入</b> · 自动转写 + 解析 + 键盘校正</div>
+  </div>
+
+</div>
+
+<script>
+  // 时辰刻度
+  const zhi = "子丑寅卯辰巳午未申酉戌亥".split("");
+  const cur = 10; // 戌时
+  document.getElementById("scale").innerHTML = zhi.map((z,i)=>
+    `<div class="seg ${i===cur?'on':''}"><span class="bar"></span><span class="z">${z}</span></div>`
+  ).join("");
+
+  // 2026年11月（周一为一周之始）
+  const gz = {1:"己卯",2:"庚辰",3:"辛巳",4:"壬午",5:"癸未",6:"甲申",7:"乙酉",8:"丙戌",9:"丁亥",
+    10:"戊子",11:"己丑",12:"庚寅",13:"辛卯",14:"壬辰",15:"癸巳",16:"甲午",17:"乙未",18:"丙申",
+    19:"丁酉",20:"戊戌",21:"己亥",22:"庚子",23:"辛丑",24:"壬寅",25:"癸卯",26:"甲辰",27:"乙巳",
+    28:"丙午",29:"丁未",30:"戊申"};
+  const term = {7:"立冬",22:"小雪"};
+  const dots = {12:2,15:1,20:1,25:1};
+  const weeks = [
+    [0,0,0,0,0,0,1],
+    [2,3,4,5,6,7,8],
+    [9,10,11,12,13,14,15],
+    [16,17,18,19,20,21,22],
+    [23,24,25,26,27,28,29],
+    [30,0,0,0,0,0,0]
+  ];
+  let html = "";
+  weeks.forEach(w=>{
+    w.forEach(d=>{
+      if(d===0){ html += `<div class="day"></div>`; return; }
+      const isToday = d===12;
+      const tz = term[d] ? `<span class="term">${term[d]}</span>` : `<span class="gz">${gz[d]}</span>`;
+      const ds = dots[d] ? `<span class="dots">${'<i></i>'.repeat(dots[d])}</span>` : "";
+      html += `<div class="day ${isToday?'today':''}">
+        <span class="num">${d}</span>${tz}${ds}</div>`;
+    });
+  });
+  document.getElementById("grid").innerHTML = html;
+</script>
+</body>
+</html>
