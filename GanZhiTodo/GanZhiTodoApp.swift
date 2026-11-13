@@ -29,7 +29,8 @@ struct GanZhiTodoApp: App {
                 .environment(\.locale, Locale(identifier: "zh_CN"))
                 .onOpenURL { url in
                     if url.host == "voice" {
-                        app.route = .voice
+                        // 改动 9：URL 唤起 anchor = 今天
+                        app.route = .voice(anchor: Date().startOfBeijingDay)
                     }
                 }
         }

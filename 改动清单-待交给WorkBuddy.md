@@ -837,3 +837,20 @@ public enum TextNormalizer {
 - 全部改动执行完并 push 后，一次性触发构建（一次构建包含所有改动）
 - 构建产物：Actions 页本次运行底部 Artifacts → `GanZhiTodo-unsigned-ipa`（zip）→ 解压出 `GanZhiTodo.ipa`
 - 覆盖安装提醒：签装时必须用同一个 Apple ID、不改 bundle id，用户手机上的待办数据才会保留
+
+## 改动 9：语音录入的上下文日期【执行中】
+
+**现象**：点开 11/20 那页录音说「下午三点去游泳」，卡片日期变成今天或明天。
+**根因**：`parse(text, now: Date())` 用的是真实此刻；且「过了点就 +1 天」的逻辑把 15:00 顺延到了明天。
+
+要点：
+1. `TodoParser.parse` 增加 `anchor: Date?` 参数，base = anchor ?? now，所有相对日期以 base 为基准
+2. 只有时间没有日期 → 日期取 startOfDay(base)，不走顺延；顺延只在 anchor 就是今天时保留（今天 23:00 说「晚上 8 点」→ 明天 20:00）
+3. `ParsedTodo` 增加 `hasExplicitDate`
+4. `AppModel.Route.voice` 改成 `voice(anchor: Date)`：首页底部入口 anchor = selectedDay；日详情/周详情 anchor = 正在看的那一天；Siri 唤起 anchor = 今天
+5. `VoiceCaptureView` 接收 anchor，兜底日期用 anchor + 9h，不再依赖全局 selectedDay
+6. dueDate 已过去时不创建提醒，卡片提示「时间已过，只记录不提醒」
+7. 周详情页右上角话筒入口（anchor = 选中列）——随改动 7 的页面重构一并落地
+8. 卡片日期行「11月20日 周五 · 15:00」，本页兜底加 8pt 灰角标「本页」；顶部 9pt 灰字「录入位置：11月20日」
+
+红线：不接大模型、不猜时间、确认卡片仍是唯一落库入口。

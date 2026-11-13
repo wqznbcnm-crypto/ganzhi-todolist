@@ -15,6 +15,10 @@ struct VoiceCaptureView: View {
     @EnvironmentObject var app: AppModel
     @Environment(\.dismiss) private var dismiss
 
+    /// 改动 9：上下文日期。在某一天的页面录音时 = 那一天；
+    /// 相对日期与兜底日期都以它为基准（不再依赖全局 selectedDay）
+    var anchor: Date = Date().startOfBeijingDay
+
     enum Phase: Equatable {
         case listening
         case done
@@ -36,6 +40,10 @@ struct VoiceCaptureView: View {
     @State private var customReminderText = ""
     /// 改动 8：解析出的时间是否为用户明说（false → 时间行加「默认」角标）
     @State private var parsedHasExplicitTime = true
+    /// 改动 9：解析出的日期是否为用户明说（false 且有日期 → 加「本页」角标）
+    @State private var parsedHasExplicitDate = true
+    /// 改动 9：日期是否来自本页兜底（anchor + 9h）
+    @State private var dateFromPage = false
     /// 改动 8：防连点产生两张卡片的令牌（每次 finalize 校验）
     @State private var parseToken = UUID()
     /// 改动 8：识别原文可点编辑 / 长按查看原始未归一化文本
@@ -182,6 +190,12 @@ struct VoiceCaptureView: View {
 
     private var confirmCard: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // 改动 9：顶部一行「录入位置」灰字，说明当前录音的上下文日期
+            Text("录入位置：\(anchorPageText)")
+                .font(.system(size: 9))
+                .foregroundStyle(Theme.secondaryText)
+                .padding(.bottom, 4)
+
             // 卡片顶部固定一行：识别原文（浅灰小字）。
             // 点按可进入文本编辑，改完立即重新解析；长按查看原始未归一化文本
             VStack(alignment: .leading, spacing: 4) {
@@ -253,6 +267,15 @@ struct VoiceCaptureView: View {
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Theme.softFill))
                     }
+                    // 改动 9：日期来自本页兜底（anchor 09:00）→ 加「本页」角标
+                    if hasDue && dateFromPage {
+                        Text("本页")
+                            .font(.system(size: 8))
+                            .foregroundStyle(Theme.secondaryText)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Theme.softFill))
+                    }
                     Spacer()
                     if hasDue {
                         Button {
@@ -282,7 +305,12 @@ struct VoiceCaptureView: View {
                 if showDatePicker {
                     DatePicker("", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
                         .labelsHidden()
-                        .onChange(of: dueDate) { _, _ in hasDue = true }
+                        .onChange(of: dueDate) { _, _ in
+                            hasDue = true
+                            dateFromPage = false          // 用户手动改了日期：不再是本页兜底
+                            parsedHasExplicitDate = true
+                            parsedHasExplicitTime = true
+                        }
                 }
             }
             .padding(.vertical, 10)
@@ -323,6 +351,14 @@ struct VoiceCaptureView: View {
                 Spacer()
             }
             .padding(.vertical, 10)
+
+            // 改动 9：时间已过 → 提示只记录不提醒（保存时也不会创建通知）
+            if dueIsPast {
+                Text("时间已过，只记录不提醒")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.secondaryText)
+                    .padding(.bottom, 8)
+            }
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.softFill))
@@ -334,7 +370,19 @@ struct VoiceCaptureView: View {
         let comps = cal.dateComponents([.month, .day, .weekday, .hour, .minute], from: dueDate)
         let weekdayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]   // weekday: 1=周日
         let wd = weekdayNames[(comps.weekday ?? 1) - 1]
-        return String(format: "%d月%d日 %@ %02d:%02d", comps.month ?? 1, comps.day ?? 1, wd, comps.hour ?? 0, comps.minute ?? 0)
+        // 改动 9：日期行格式「11月20日 周五 · 15:00」
+        return String(format: "%d月%d日 %@ · %02d:%02d", comps.month ?? 1, comps.day ?? 1, wd, comps.hour ?? 0, comps.minute ?? 0)
+    }
+
+    /// 改动 9：录入位置（anchor 日期）文本，如「11月20日」
+    private var anchorPageText: String {
+        let comps = GanzhiCalendar.calendar.dateComponents([.month, .day], from: anchor)
+        return String(format: "%d月%d日", comps.month ?? 1, comps.day ?? 1)
+    }
+
+    /// 改动 9：dueDate 已过去 → 不创建提醒，卡片给出提示
+    private var dueIsPast: Bool {
+        hasDue && dueDate < Date()
     }
 
     private var reminderDisplayText: String {
@@ -492,20 +540,30 @@ struct VoiceCaptureView: View {
         phase = .done
     }
 
-    /// 用（归一化后的）文本重跑解析并刷新卡片三项；确认卡片唯一落库入口不变
+    /// 用（归一化后的）文本重跑解析并刷新卡片三项；确认卡片唯一落库入口不变。
+    /// 改动 9：解析以 anchor 为上下文；无日期时兜底 = anchor + 9h（anchor 非今天才有本页兜底）
     private func reparse(from text: String) {
-        let parsed = TodoParser.parse(text, now: Date())
+        let parsed = TodoParser.parse(text, now: Date(), anchor: anchor)
         parsedHasExplicitTime = parsed.hasExplicitTime
+        parsedHasExplicitDate = parsed.hasExplicitDate
         parsedTitle = parsed.title.isEmpty ? text : parsed.title
         if parsedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parsedTitle = "新待办"   // 兜底：永不留白
         }
+        let anchorIsToday = GanzhiCalendar.calendar.isDate(anchor, inSameDayAs: Date())
         if let due = parsed.dueDate {
             hasDue = true
             dueDate = due
+            dateFromPage = false
+        } else if !anchorIsToday {
+            // 在某个具体日期的页面录音：没说日期 → 落在本页（anchor 09:00），卡片加「本页」角标
+            hasDue = true
+            dueDate = anchor.addingTimeInterval(9 * 3600)
+            dateFromPage = true
         } else {
             hasDue = false
-            dueDate = (app.selectedDay).addingTimeInterval(9 * 3600)
+            dueDate = anchor.addingTimeInterval(9 * 3600)
+            dateFromPage = false
         }
         showDatePicker = false
         reminderMinutes = parsed.reminderOffsets.first ?? app.defaultReminder
@@ -530,19 +588,23 @@ struct VoiceCaptureView: View {
         parsedTitle = ""
         reminderMinutes = nil
         parsedHasExplicitTime = true
+        parsedHasExplicitDate = true
+        dateFromPage = false
         rawOriginal = ""
         editingOriginal = false
         showDatePicker = false
         startEngine()
     }
 
-    /// 保存：写入 TodoStore，并按选中的提醒设置通知（由 store.add 内部调度）
+    /// 保存：写入 TodoStore，并按选中的提醒设置通知（由 store.add 内部调度）。
+    /// 改动 9：dueDate 已过去时不创建提醒（只记录）
     private func save() {
         let trimmed = parsedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }   // 转写为空/未填标题：不产生待办
+        let offsets = dueIsPast ? [] : (reminderMinutes.map { [$0] } ?? [])
         let item = TodoItem(title: trimmed,
                             dueDate: hasDue ? dueDate : nil,
-                            reminderOffsets: reminderMinutes.map { [$0] } ?? [],
+                            reminderOffsets: offsets,
                             allDay: !hasDue)
         store.add(item)
         dismiss()

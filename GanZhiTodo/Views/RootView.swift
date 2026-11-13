@@ -20,8 +20,8 @@ struct RootView: View {
         .sheet(item: $app.route) { route in
             Group {
                 switch route {
-                case .voice:
-                    VoiceCaptureView()
+                case .voice(let anchor):
+                    VoiceCaptureView(anchor: anchor)
                 case .newTodo(let day):
                     TodoEditorView(day: day)
                 case .editTodo(let item):

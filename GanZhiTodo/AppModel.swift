@@ -9,14 +9,16 @@ import SwiftUI
 final class AppModel: ObservableObject {
 
     enum Route: Identifiable {
-        case voice
+        /// 改动 9：语音录入带上下文日期 anchor
+        /// （首页底部入口 = selectedDay；日/周详情 = 正在看的那天；Siri/URL 唤起 = 今天）
+        case voice(anchor: Date)
         case newTodo(Date)
         case editTodo(TodoItem)
         case settings
 
         var id: String {
             switch self {
-            case .voice: return "voice"
+            case .voice(let anchor): return "voice-\(anchor.timeIntervalSince1970)"
             case .newTodo(let day): return "new-\(day.timeIntervalSince1970)"
             case .editTodo(let item): return "edit-\(item.id.uuidString)"
             case .settings: return "settings"
@@ -92,7 +94,8 @@ final class AppModel: ObservableObject {
         let defaults = AppGroupConfig.sharedDefaults
         if defaults.bool(forKey: AppGroupConfig.pendingVoiceKey) {
             defaults.set(false, forKey: AppGroupConfig.pendingVoiceKey)
-            route = .voice
+            // 改动 9：Siri 唤起 anchor = 今天（不能拿上次残留的 selectedDay）
+            route = .voice(anchor: Date().startOfBeijingDay)
         }
     }
 }

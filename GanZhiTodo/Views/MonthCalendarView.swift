@@ -408,7 +408,8 @@ struct BottomActionBar: View {
             .buttonStyle(.plain)
 
             Button {
-                app.route = .voice
+                // 改动 9：首页底部语音入口 anchor = 当前选中日期
+                app.route = .voice(anchor: app.selectedDay)
             } label: {
                 Label("语音录入", systemImage: "waveform")
                     .font(.system(size: 15, weight: .semibold))

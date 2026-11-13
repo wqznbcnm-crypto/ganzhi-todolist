@@ -17,13 +17,16 @@ public struct ParsedTodo {
     public var dueDate: Date?
     /// 是否明确说了时刻（否则按当天 09:00，视为「全天」）
     public var hasExplicitTime: Bool
+    /// 改动 9：是否明确说了日期（明天/周几/几号/X天后…）；false → 卡片加「本页」角标
+    public var hasExplicitDate: Bool
     public var reminderOffsets: [Int]
     public var originalText: String
 
-    public init(title: String, dueDate: Date?, hasExplicitTime: Bool, reminderOffsets: [Int], originalText: String) {
+    public init(title: String, dueDate: Date?, hasExplicitTime: Bool, reminderOffsets: [Int], originalText: String, hasExplicitDate: Bool = true) {
         self.title = title
         self.dueDate = dueDate
         self.hasExplicitTime = hasExplicitTime
+        self.hasExplicitDate = hasExplicitDate
         self.reminderOffsets = reminderOffsets
         self.originalText = originalText
     }
@@ -80,12 +83,19 @@ public enum TodoParser {
 
     // MARK: 主入口
 
-    public static func parse(_ rawText: String, now: Date = Date()) -> ParsedTodo {
+    /// - Parameter anchor: 上下文日期（改动 9）：在某一天的页面录音时传那一天，
+    ///   所有相对日期以它为基准；nil / 未传 = 以 now 为基准（Siri、首页默认）
+    public static func parse(_ rawText: String, now: Date = Date(), anchor: Date? = nil) -> ParsedTodo {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         let ns = text as NSString
         var removeRanges: [NSRange] = []
         let cal = GanzhiCalendar.calendar
-        let nowComps = cal.dateComponents([.year, .month, .day, .hour, .minute, .weekday], from: now)
+        // 改动 9：base = anchor ?? now，所有相对日期以 base 为基准
+        let base = anchor ?? now
+        let nowComps = cal.dateComponents([.year, .month, .day, .hour, .minute, .weekday], from: base)
+        /// 改动 9：anchor 就是今天（或未指定）时保留「过了点顺延到明天」；
+        /// 在过去/未来的页面上录音不顺延
+        let anchorIsToday = cal.isDate(base, inSameDayAs: now)
 
         var dayDate: Date? = nil          // 目标日期（当天 0 点）
         var hour: Int? = nil
@@ -93,6 +103,7 @@ public enum TodoParser {
         var explicitTime = false
         var offsets: [Int] = []
         var relativeInterval: TimeInterval? = nil
+        var relativeUnitIsLong = false    // 改动 9：X 天/周/月后 以 base 为基准；分钟/小时后仍以真实此刻
 
         // ---- 1. 提醒提前量 ----
         if let hit = firstHit(#"(提前|提早)[\s,，。、~·]*(半个|[0-9一二两三四五六七八九十半]+)[\s,，。、~·]*(分钟|分|小时|钟头|天|日|周|个?星期|个?月)[\s,，。、~·]*(提醒|通知|叫我|喊我)?"#, in: ns) {
@@ -164,7 +175,7 @@ public enum TodoParser {
             case "前天": delta = -2
             default: delta = 0
             }
-            dayDate = cal.date(byAdding: .day, value: delta, to: cal.startOfDay(for: now))
+            dayDate = cal.date(byAdding: .day, value: delta, to: cal.startOfDay(for: base))
             if word.contains("晚") && hour == nil { hour = 20; explicitTime = true }
             if word.contains("早") && hour == nil { hour = 8; explicitTime = true }
             removeRanges.append(hit.range)
@@ -193,14 +204,14 @@ public enum TodoParser {
                 let d = (5 - todayIndex + 7) % 7
                 delta = d == 0 ? 7 : d                           // 今天是周六 → 下个周六；周日 → 下个周六
             }
-            dayDate = cal.date(byAdding: .day, value: delta, to: cal.startOfDay(for: now))
+            dayDate = cal.date(byAdding: .day, value: delta, to: cal.startOfDay(for: base))
             removeRanges.append(hit.range)
         }
 
         // 3a3. 月底类（增强规格 2）：月底 / 月底前 / 这个月月底 → 本月最后一天
         if dayDate == nil,
            let hit = firstHit(#"(这个月|本月)?月底(之?前|以前)?"#, in: ns) {
-            if let lastDay = cal.range(of: .day, in: .month, for: now)?.last {
+            if let lastDay = cal.range(of: .day, in: .month, for: base)?.last {
                 var comps = DateComponents(year: nowComps.year, month: nowComps.month, day: lastDay, hour: 9)
                 comps.timeZone = GanzhiCalendar.beijing
                 dayDate = cal.date(from: comps)
@@ -224,7 +235,7 @@ public enum TodoParser {
                 case "本", "这": break
                 default: if delta < 0 { delta += 7 }
                 }
-                dayDate = cal.date(byAdding: .day, value: delta, to: cal.startOfDay(for: now))
+                dayDate = cal.date(byAdding: .day, value: delta, to: cal.startOfDay(for: base))
                 removeRanges.append(hit.range)
             }
         }
@@ -237,9 +248,9 @@ public enum TodoParser {
             let unit = hit.groups[2] ?? ""
             if unit.contains("分钟") || unit.contains("分") { relativeInterval = num * 60 }
             else if unit.contains("小时") || unit.contains("钟头") { relativeInterval = num * 3600 }
-            else if unit.contains("天") || unit.contains("日") { relativeInterval = num * 86400 }
-            else if unit.contains("周") || unit.contains("星期") { relativeInterval = num * 7 * 86400 }
-            else if unit.contains("月") { relativeInterval = num * 30 * 86400 }
+            else if unit.contains("天") || unit.contains("日") { relativeInterval = num * 86400; relativeUnitIsLong = true }
+            else if unit.contains("周") || unit.contains("星期") { relativeInterval = num * 7 * 86400; relativeUnitIsLong = true }
+            else if unit.contains("月") { relativeInterval = num * 30 * 86400; relativeUnitIsLong = true }
             removeRanges.append(hit.range)
         }
 
@@ -251,7 +262,7 @@ public enum TodoParser {
                 let yearWord = hit.groups[1] ?? ""
                 if yearWord.contains("明年") { year += 1 }
                 if yearWord.contains("后年") { year += 2 }
-                if yearWord.isEmpty && !dateIsFuture(month: m, day: d, now: now) { year += 1 }
+                if yearWord.isEmpty && !dateIsFuture(month: m, day: d, now: base) { year += 1 }
                 var comps = DateComponents(year: year, month: m, day: d, hour: 9)
                 comps.timeZone = GanzhiCalendar.beijing
                 dayDate = cal.date(from: comps)
@@ -275,7 +286,7 @@ public enum TodoParser {
            let hit = firstHit(#"\b([0-9]{1,2})/([0-9]{1,2})\b"#, in: ns) {
             if let m = Int(hit.groups[1] ?? "0"), let d = Int(hit.groups[2] ?? "0"), (1...12).contains(m), (1...31).contains(d) {
                 var year = nowComps.year ?? 2026
-                if !dateIsFuture(month: m, day: d, now: now) { year += 1 }
+                if !dateIsFuture(month: m, day: d, now: base) { year += 1 }
                 var comps = DateComponents(year: year, month: m, day: d, hour: 9)
                 comps.timeZone = GanzhiCalendar.beijing
                 dayDate = cal.date(from: comps)
@@ -286,8 +297,14 @@ public enum TodoParser {
         // ---- 4. 组装时间 ----
         var due: Date? = nil
         if let interval = relativeInterval {
-            due = now.addingTimeInterval(interval)
-            explicitTime = true
+            if relativeUnitIsLong {
+                // 改动 9：X 天/周/月后以 base（页面上下文）为基准；未说时刻 → 目标日 09:00（与「明天」口径一致）
+                due = cal.startOfDay(for: base).addingTimeInterval(interval + 9 * 3600)
+            } else {
+                // 分钟/小时级相对量仍以真实此刻为基准
+                due = now.addingTimeInterval(interval)
+                explicitTime = true
+            }
         } else if let day = dayDate {
             var comps = DateComponents()
             comps.year = cal.component(.year, from: day)
@@ -298,6 +315,8 @@ public enum TodoParser {
             comps.timeZone = GanzhiCalendar.beijing
             due = cal.date(from: comps)
         } else if let h = hour {
+            // 改动 9：只有时间没有日期 → 日期取 startOfDay(base)，不走顺延；
+            // 顺延只在 anchor 是今天时保留（今天 23:00 说「晚上 8 点」→ 明天 20:00）
             var comps = DateComponents()
             comps.year = nowComps.year
             comps.month = nowComps.month
@@ -305,7 +324,7 @@ public enum TodoParser {
             comps.hour = h
             comps.minute = minute
             comps.timeZone = GanzhiCalendar.beijing
-            if let candidate = cal.date(from: comps), candidate < now {
+            if let candidate = cal.date(from: comps), anchorIsToday, candidate < now {
                 due = cal.date(byAdding: .day, value: 1, to: candidate)
             } else {
                 due = cal.date(from: comps)
@@ -317,7 +336,11 @@ public enum TodoParser {
         title = stripFillers(title)
         if title.isEmpty { title = rawText.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-        return ParsedTodo(title: title, dueDate: due, hasExplicitTime: explicitTime, reminderOffsets: offsets, originalText: rawText)
+        // 改动 9：是否明确说了日期
+        let hasExplicitDate = (dayDate != nil || relativeInterval != nil)
+        return ParsedTodo(title: title, dueDate: due, hasExplicitTime: explicitTime,
+                          reminderOffsets: offsets, originalText: rawText,
+                          hasExplicitDate: hasExplicitDate)
     }
 
     // MARK: 辅助

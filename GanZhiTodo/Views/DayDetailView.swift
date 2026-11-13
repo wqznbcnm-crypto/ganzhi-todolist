@@ -113,8 +113,8 @@ struct DayDetailActionBar: View {
             .buttonStyle(.plain)
 
             Button {
-                app.select(day)
-                app.route = .voice
+                // 改动 9：日详情页语音入口 anchor = 正在看的那天
+                app.route = .voice(anchor: day)
             } label: {
                 Label("语音录入", systemImage: "waveform")
                     .font(.system(size: 15, weight: .semibold))
