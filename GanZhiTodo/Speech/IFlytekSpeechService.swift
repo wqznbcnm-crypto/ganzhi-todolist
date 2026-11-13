@@ -30,6 +30,8 @@ public final class IFlytekSpeechService: NSObject, SpeechRecognitionService {
     private var recognizer: IFlySpeechRecognizer?
     private var accumulated = ""
     private var started = false
+    /// 改动 8：final 结果只允许发出一次（含空串），防止 isLast 与 stop() 双触发
+    private var didSendFinal = false
 
     public static func isAvailable() -> Bool { true }
 
@@ -69,6 +71,7 @@ public final class IFlytekSpeechService: NSObject, SpeechRecognitionService {
 
         accumulated = ""
         started = false
+        didSendFinal = false
         recognizer = rec
 
         DispatchQueue.main.async { [weak self] in
@@ -80,14 +83,16 @@ public final class IFlytekSpeechService: NSObject, SpeechRecognitionService {
     }
 
     public func stop() {
+        // 改动 8：stop() 保证 final 恰好回一次，且空串也发
+        guard !didSendFinal else { return }
+        didSendFinal = true
         recognizer?.stopListening()
-        if !accumulated.isEmpty {
-            onFinalResult?(accumulated)
-        }
+        onFinalResult?(accumulated)
         accumulated = ""
     }
 
     public func cancel() {
+        // 改动 8：cancel 不置 didSendFinal，也不回调 final
         recognizer?.cancel()
         accumulated = ""
     }
@@ -129,6 +134,9 @@ extension IFlytekSpeechService: IFlySpeechRecognizerDelegate {
         accumulated += text
         onPartialResult?(accumulated)
         if isLast {
+            // 改动 8：isLast 分支保证 final 只发一次
+            guard !didSendFinal else { return }
+            didSendFinal = true
             onFinalResult?(accumulated)
             accumulated = ""
         }

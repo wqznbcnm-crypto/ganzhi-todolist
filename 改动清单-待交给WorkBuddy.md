@@ -15,6 +15,8 @@
 - 改动涉及 Swift 代码时，只改清单中列出的文件，不要顺手重构其他文件
 - **先读改动 7 再动手**：页面结构已重构为「首页 = 概览 / 周详情页 = 关系图」，
   首页**不允许**出现任何刑冲合害连线或关系文字。若按旧结构把连线留在首页，整条改动视为未完成
+- **改动 8 优先级最高**：语音录入出现「同一句话有时能识别、有时卡片三项全空」，这是缺陷不是体验问题，
+  请在继续做其他改动之前先按改动 8 修完并单独构建一版验证
 - **视觉稿在仓库里**：`Preview/home.html`（首页）、`Preview/week.html`（周详情页），
   用浏览器直接打开对照；两者是终稿，实现结果须与之一致
 - 每条改动做完请按该条末尾的「验收标准」自测，不要跳过
@@ -672,6 +674,161 @@ public enum TenGod: String {
 3. **改动 6（面板）**：本改动只负责"面板放在哪、旁边有什么"，不改面板内部的列序、配色、十神；
 4. **改动 2（解析器）/ 改动 3（确认卡片）**：语音录入后新建的待办应出现在「最近待办」与
    「本周待办」中，无需额外改动。
+
+---
+
+## 改动 8：语音录入稳定性（防空卡片 + 文本归一化 + 空字段不留白）【最高优先级，先于其他改动执行】
+
+**现象**（真机复现）：同一句「周日去游泳」，
+有时确认卡片三项齐全（标题「去游泳」、时间「周日」）；
+有时卡片**标题、时间、提醒全部空白**，点保存都无从下手。同一句话、同一台手机，结果不稳定。
+
+**这不是规则引擎没覆盖「周日」**，而是两个确定性缺陷叠加，必须按顺序修。
+
+### A. 根因一：空文本照样弹卡片（主因）
+
+调用链：`stop()` → `onFinalResult(text)` → `VoiceCaptureView.finalize(text)` → `TodoParser.parse(text)`
+
+1. `AppleSpeechService.stop()` 里写的是 `if !lastPartial.isEmpty { onFinalResult?(lastPartial) }`
+   ——**说完立刻松手时 `lastPartial` 还是空串，final 根本不回调**，页面停在「识别中」或走 error 分支；
+2. 更常见的情况：回调了，但 `text` 是空串。`finalize` 不做判空，
+   `TodoParser.parse("")` 返回 `title = ""`、`dueDate = nil`、`reminderOffsets = []`；
+3. 兜底 `if parsedTitle.isEmpty { parsedTitle = text }` 在 `text` 也是空串时**等于没兜底**；
+4. 结果就是三项全空的卡片——和用户看到的现象完全吻合。
+
+**修改点 1：`AppleSpeechService` / `IFlytekSpeechService` 的 `stop()` 必须保证 final 恰好发一次、且空串也发**
+
+```swift
+private var didSendFinal = false
+
+func stop() {
+    guard !didSendFinal else { return }
+    didSendFinal = true
+    audioEngine?.stop(); recognitionRequest?.endAudio()   // 保留原有停止逻辑
+    onFinalResult?(lastPartial)                            // 空串也发，由上层决定
+}
+```
+
+- `result.isFinal` 分支同样加 `guard !didSendFinal else { return }`，避免 final 触发两次（会弹两次卡片）；
+- 讯飞 `onResult` 里 `isLast` 分支同理；
+- `cancel()` 不置 `didSendFinal`，但也不回调 final（用户主动取消不算识别）。
+
+**修改点 2：`VoiceCaptureView.finalize` 判空，空就**不弹卡片**
+
+```swift
+private func finalize(_ text: String) {
+    let clean    = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let fallback = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    let input    = clean.isEmpty ? fallback : clean
+
+    guard !input.isEmpty else {
+        phase = .error("没听清，再说一次")     // 回到录音页，保留重录按钮
+        return
+    }
+    transcript = input
+    // ↓ 其余解析逻辑不变
+}
+```
+
+- **禁止**：`input` 为空时构造空 `ParsedTodo` 并 push 确认卡片；
+- 若 `input.count <= 1`（只有一个字），也走「没听清」，不要猜。
+
+**修改点 3：停止后延迟 300ms 再解析（给识别服务吐最后一段的时间）**
+
+```swift
+func requestStop() {
+    service?.stop()
+    let snapshot = transcript
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        guard let self, self.phase == .listening else { return }
+        self.finalize(snapshot)      // 300ms 内没等到 final，就用当前 transcript 兜底
+    }
+}
+```
+
+- 用一个 `parseToken: UUID` 防止「连点两下录音 → 两次 finalize → 两张卡片」；
+- 300ms 的兜底只在 final **确实没来**时生效（来了就把 `phase` 改掉，兜底自动跳过）。
+
+### B. 根因二：卡片把「没有显式时间」画成空白
+
+`TodoParser` 对「周日去游泳」返回 `dueDate = 周日 09:00`、`hasExplicitTime = false`。
+若卡片用 `hasExplicitTime` 决定是否显示时间，这一格就空了——用户以为没识别到，其实识别到了。
+
+**修改点 4：三个字段永远不许留白**（真空白 = 缺陷）
+
+| 字段 | 有值时 | 无值时（必须显示） |
+| --- | --- | --- |
+| 标题 | 「去游泳」 | 原文全文；原文为空 → 「新待办」并聚焦键盘 |
+| 日期/时间 | `周日 09:00` | `周日 · 未设具体时间`（灰字，可点选） |
+| 提醒 | `提前 30 分钟` | `不提醒`（灰字，可点选） |
+
+- `hasExplicitTime == false` 时，时间行末尾加一枚 8pt 灰角标 `默认`，说明「09:00 是补的，不是你说的」；
+- 任一字段为空（无标题/无时间/无提醒），该行左侧加一枚 3pt 朱砂点，提示「这里需要你确认」；
+- 卡片顶部固定一行 9pt 灰字：`识别原文：周日去游泳`（可点击进入文本编辑，改完立即重新解析）。
+
+### C. 文本归一化（新增 `GanZhiTodo/Parser/TextNormalizer.swift`）
+
+解析前先过一遍归一化，专治「同一句话结果不同」的另一半原因（标点、全角、同音字）：
+
+```swift
+public enum TextNormalizer {
+    public static func normalize(_ s: String) -> String {
+        var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        t = t.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? t   // ３点→3点
+        t = t.replacingOccurrences(of: "[，。、！？；：,\.!?;:~·…]", with: " ",
+                                   options: .regularExpression)               // 标点→空格
+        t = t.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        t = cnNumberToArabic(t)                                              // 三点→3点、二十→20
+        for (wrong, right) in homophones { t = t.replacingOccurrences(of: wrong, with: right) }
+        return t.trimmingCharacters(in: .whitespaces)
+    }
+
+    static let homophones: [(String, String)] = [
+        ("周曰", "周日"), ("州日", "周日"), ("周天", "周天"),   // 只改近形误识，不猜语义
+        ("星其", "星期"), ("里拜", "礼拜"), ("题醒", "提醒"),
+        ("明早", "明早"), ("待办事项", "待办")
+    ]
+}
+```
+
+- `cnNumberToArabic` 只需覆盖：`一 二 三 四 五 六 七 八 九 十 两 半` 与 `十一…九十九`；
+- **不要**做语义级改写（例如把「回头」改成「明天」），那是改动 2 明确禁止的猜；
+- 归一化后的文本同时用于解析**和**卡片上的「识别原文」（原始未归一化文本可长按查看）。
+
+**修改点 5：正则容错，把 `\s*` 换成 `[\\s,，。、~·]*`**
+
+改动 2 里所有涉及「时间/日期/提醒」的正则都要换，重点这几处：
+
+| 位置 | 现状问题 | 改法 |
+| --- | --- | --- |
+| 时刻 `2b` | 只容忍空白，不容忍标点 | `(上午\|…)?[\s,，。、~·]*([0-9]\{1,2}\|…)[点時时]` |
+| 周几 `3b` | 同上；缺「周末」 | 见下 |
+| 提前量 `1` | 「提前半小时」OK，「提前 半个小时」也 OK | 同上替换 |
+
+**「周几」补全**（改动 2 已有 `周/星期/礼拜 + [一二三四五六日天末1-7]`，补两个词）：
+
+- `周末` → 最近的周六（若今天已是周六/周日，取下一个周六）；
+- `这周末` / `下周末` → 本周六 / 下周六；
+- 「周天」「星期天」「礼拜日」已能命中，不用改。
+
+### D. 修改后必须仍然守住的红线
+
+1. **仍然不接大模型**（改动 2 的 B 方案），本改动只加字符串处理；
+2. **仍然不猜**：没时间词就不填日期，卡片显示「未设时间」而不是塞今天；
+3. **确认卡片仍是唯一落库入口**，不得为了方便跳过卡片直接保存。
+
+### E. 验收标准（逐条截图/录屏，缺一不可）
+
+1. **连说 10 次**「周日去游泳」：10 次卡片都有标题「去游泳」+ 时间「周日」；
+   允许个别次识别成别的词，但**任何一次都不许出现三空卡片**；
+2. **说完立刻松手**（不等界面提示）连试 5 次：不出现空卡片，最差也是「没听清，再说一次」；
+3. **静音收尾**（说完停顿 2 秒让它自己结束）连试 5 次：同上；
+4. **无时间句**：「买牛奶」→ 时间行显示「未设时间」，不是空白；提醒行显示「不提醒」；
+5. **带标点句**：「明天下午三点，跟老陈开会。」→ 三项齐全（这是最容易挂的一条）；
+6. **全中文数字**：「明天下午三点半」与「明天下午 3 点半」结果一致；
+7. **不重复弹卡片**：连点两次录音按钮，只产生一张确认卡片；
+8. **原文可见**：卡片顶部始终能看到「识别原文」；
+9. **回归**：改动 1/2/3 的原验收全部仍通过。
 
 ---
 

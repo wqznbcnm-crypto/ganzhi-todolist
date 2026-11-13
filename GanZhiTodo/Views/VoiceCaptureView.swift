@@ -34,6 +34,15 @@ struct VoiceCaptureView: View {
     @State private var reminderMinutes: Int? = nil
     @State private var showCustomReminder = false
     @State private var customReminderText = ""
+    /// 改动 8：解析出的时间是否为用户明说（false → 时间行加「默认」角标）
+    @State private var parsedHasExplicitTime = true
+    /// 改动 8：防连点产生两张卡片的令牌（每次 finalize 校验）
+    @State private var parseToken = UUID()
+    /// 改动 8：识别原文可点编辑 / 长按查看原始未归一化文本
+    @State private var editingOriginal = false
+    @State private var originalDraft = ""
+    @State private var rawOriginal = ""
+    @State private var showRawOriginal = false
 
     @State private var service: (any SpeechRecognitionService)?
 
@@ -80,6 +89,11 @@ struct VoiceCaptureView: View {
                 Button("取消", role: .cancel) { }
             } message: {
                 Text("填 0 表示准时提醒")
+            }
+            .alert("原始转写文本", isPresented: $showRawOriginal) {
+                Button("好", role: .cancel) { }
+            } message: {
+                Text(rawOriginal.isEmpty ? "（空）" : rawOriginal)
             }
         }
         .onAppear(perform: begin)
@@ -168,15 +182,42 @@ struct VoiceCaptureView: View {
 
     private var confirmCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 卡片顶部：语音转写原文（浅灰小字，供核对）
-            Text("原文：\(transcript)")
-                .font(.system(size: 10.5))
-                .foregroundStyle(Theme.secondaryText.opacity(0.8))
-                .lineLimit(2)
-                .padding(.bottom, 10)
+            // 卡片顶部固定一行：识别原文（浅灰小字）。
+            // 点按可进入文本编辑，改完立即重新解析；长按查看原始未归一化文本
+            VStack(alignment: .leading, spacing: 4) {
+                if editingOriginal {
+                    TextField("识别原文", text: $originalDraft, axis: .vertical)
+                        .lineLimit(1...3)
+                        .font(.system(size: 13))
+                        .onSubmit {
+                            let t = TextNormalizer.normalize(originalDraft)
+                            guard !t.isEmpty else { return }
+                            transcript = t
+                            reparse(from: t)
+                            editingOriginal = false
+                        }
+                } else {
+                    Text("识别原文：\(transcript)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(2)
+                        .onTapGesture {
+                            originalDraft = transcript
+                            editingOriginal = true
+                        }
+                        .onLongPressGesture {
+                            showRawOriginal = true
+                        }
+                }
+            }
+            .padding(.bottom, 10)
 
-            // 第一行：事件（点击弹键盘可编辑）
+            // 第一行：事件（点击弹键盘可编辑；无解析结果→原文全文，再兜底「新待办」）
             HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Circle()
+                    .fill(Theme.accent)
+                    .frame(width: 3, height: 3)
+                    .opacity(parsedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 1 : 0)
                 Text("事件")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.secondaryText)
@@ -189,43 +230,55 @@ struct VoiceCaptureView: View {
 
             Divider().overlay(Theme.secondaryText.opacity(0.18))
 
-            // 第二行：时间（点击弹出系统 DatePicker；可清除为「无日期」）
+            // 第二行：时间（点击弹出系统 DatePicker；无时间→「未设具体时间」灰字可点选；
+            //         非用户明说的时间加「默认」角标）
             VStack(spacing: 8) {
-                Button {
+                HStack {
+                    Circle()
+                        .fill(Theme.accent)
+                        .frame(width: 3, height: 3)
+                        .opacity(hasDue ? 0 : 1)
+                    Text("时间")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(width: 26, alignment: .leading)
+                    Text(dueDisplayText)
+                        .font(.system(size: 16))
+                        .foregroundStyle(hasDue ? Color.primary : Theme.secondaryText)
+                    if hasDue && !parsedHasExplicitTime {
+                        Text("默认")
+                            .font(.system(size: 8))
+                            .foregroundStyle(Theme.secondaryText)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Theme.softFill))
+                    }
+                    Spacer()
+                    if hasDue {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                hasDue = false
+                                showDatePicker = false
+                            }
+                        } label: {
+                            Text("清除")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showDatePicker.toggle()
                         if showDatePicker && !hasDue { hasDue = true }
                     }
-                } label: {
-                    HStack {
-                        Text("时间")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.secondaryText)
-                            .frame(width: 26, alignment: .leading)
-                        Text(dueDisplayText)
-                            .font(.system(size: 16))
-                            .foregroundStyle(hasDue ? Color.primary : Theme.secondaryText)
-                        Spacer()
-                        if hasDue {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    hasDue = false
-                                    showDatePicker = false
-                                }
-                            } label: {
-                                Text("清除")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Theme.accent)
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                    }
                 }
-                .buttonStyle(.plain)
                 if showDatePicker {
                     DatePicker("", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
                         .labelsHidden()
@@ -236,8 +289,12 @@ struct VoiceCaptureView: View {
 
             Divider().overlay(Theme.secondaryText.opacity(0.18))
 
-            // 第三行：提醒（点击弹出预设菜单 + 自定义分钟数）
+            // 第三行：提醒（点击弹出预设菜单 + 自定义分钟数；无→「不提醒」灰字）
             HStack {
+                Circle()
+                    .fill(Theme.accent)
+                    .frame(width: 3, height: 3)
+                    .opacity(reminderMinutes == nil ? 1 : 0)
                 Text("提醒")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.secondaryText)
@@ -272,10 +329,12 @@ struct VoiceCaptureView: View {
     }
 
     private var dueDisplayText: String {
-        guard hasDue else { return "无日期" }
+        guard hasDue else { return "未设具体时间" }
         let cal = GanzhiCalendar.calendar
-        let comps = cal.dateComponents([.month, .day, .hour, .minute], from: dueDate)
-        return String(format: "%d月%d日 %02d:%02d", comps.month ?? 1, comps.day ?? 1, comps.hour ?? 0, comps.minute ?? 0)
+        let comps = cal.dateComponents([.month, .day, .weekday, .hour, .minute], from: dueDate)
+        let weekdayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]   // weekday: 1=周日
+        let wd = weekdayNames[(comps.weekday ?? 1) - 1]
+        return String(format: "%d月%d日 %@ %02d:%02d", comps.month ?? 1, comps.day ?? 1, wd, comps.hour ?? 0, comps.minute ?? 0)
     }
 
     private var reminderDisplayText: String {
@@ -314,9 +373,21 @@ struct VoiceCaptureView: View {
         HStack(spacing: 12) {
             if case .listening = phase {
                 Button {
-                    service?.stop()
+                    requestStop()
                 } label: {
                     Text("完成")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).frame(height: 52)
+                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color.primary))
+                }
+                .buttonStyle(.plain)
+            } else if case .error = phase {
+                // 改动 8：没听清 → 只给「重录」，不给保存（避免空数据落库）
+                Button {
+                    restart()
+                } label: {
+                    Text("重录")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 52)
@@ -380,7 +451,9 @@ struct VoiceCaptureView: View {
             DispatchQueue.main.async { self.transcript = text }
         }
         svc.onFinalResult = { text in
-            DispatchQueue.main.async { self.finalize(text) }
+            DispatchQueue.main.async {
+                self.finalize(text, token: self.parseToken)
+            }
         }
         svc.onError = { message in
             DispatchQueue.main.async {
@@ -400,11 +473,33 @@ struct VoiceCaptureView: View {
         svc.start()
     }
 
-    /// 转写+解析完成 → 弹出确认卡片（不直接入库）
-    private func finalize(_ text: String) {
-        transcript = text
+    /// 转写+解析完成 → 弹出确认卡片（不直接入库）。
+    /// 改动 8：先判空——输入为空/单字绝不构造空 ParsedTodo 弹卡片，走「没听清，再说一次」；
+    /// token 校验防止连点录音产生两张卡片。
+    private func finalize(_ text: String, token: UUID? = nil) {
+        guard token == nil || token == parseToken else { return }
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let input = clean.isEmpty ? fallback : clean
+
+        guard input.count > 1 else {
+            phase = .error("没听清，再说一次")   // 回到录音页，保留重录按钮
+            return
+        }
+        rawOriginal = text
+        transcript = TextNormalizer.normalize(input)
+        reparse(from: transcript)
+        phase = .done
+    }
+
+    /// 用（归一化后的）文本重跑解析并刷新卡片三项；确认卡片唯一落库入口不变
+    private func reparse(from text: String) {
         let parsed = TodoParser.parse(text, now: Date())
-        parsedTitle = parsed.title
+        parsedHasExplicitTime = parsed.hasExplicitTime
+        parsedTitle = parsed.title.isEmpty ? text : parsed.title
+        if parsedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parsedTitle = "新待办"   // 兜底：永不留白
+        }
         if let due = parsed.dueDate {
             hasDue = true
             dueDate = due
@@ -414,17 +509,29 @@ struct VoiceCaptureView: View {
         }
         showDatePicker = false
         reminderMinutes = parsed.reminderOffsets.first ?? app.defaultReminder
-        if parsedTitle.isEmpty {
-            parsedTitle = text
+    }
+
+    /// 改动 8：停止识别；300ms 内没等到 final 回调就用当前 transcript 兜底解析。
+    /// final 先到的话会把 phase 改成 .done，兜底自动跳过。
+    private func requestStop() {
+        service?.stop()
+        let snapshot = transcript
+        let token = parseToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard self.parseToken == token, self.phase == .listening else { return }
+            self.finalize(snapshot, token: token)
         }
-        phase = .done
     }
 
     private func restart() {
+        parseToken = UUID()   // 令牌失效：上一轮未触发的 300ms 兜底 / final 回调作废
         service?.cancel()
         transcript = ""
         parsedTitle = ""
         reminderMinutes = nil
+        parsedHasExplicitTime = true
+        rawOriginal = ""
+        editingOriginal = false
         showDatePicker = false
         startEngine()
     }

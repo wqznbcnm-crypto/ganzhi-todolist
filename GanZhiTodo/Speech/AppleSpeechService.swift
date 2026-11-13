@@ -23,6 +23,10 @@ public final class AppleSpeechService: NSObject, SpeechRecognitionService {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var lastPartial = ""
+    /// 改动 8：final 结果只允许发出一次（含空串），防止 isFinal 与 stop() 双触发弹两张卡片
+    private var didSendFinal = false
+    /// 改动 8：取消后吞掉迟到的 isFinal 回调
+    private var didCancel = false
 
     public static func isAvailable() -> Bool { true }
 
@@ -79,6 +83,8 @@ public final class AppleSpeechService: NSObject, SpeechRecognitionService {
         }
 
         lastPartial = ""
+        didSendFinal = false
+        didCancel = false
         task = recognizer.recognitionTask(with: req) { [weak self] result, error in
             guard let self else { return }
             if let result {
@@ -86,8 +92,11 @@ public final class AppleSpeechService: NSObject, SpeechRecognitionService {
                 self.lastPartial = text
                 self.onPartialResult?(text)
                 if result.isFinal {
+                    // 改动 8：final 恰好发一次；取消过的会话不再回调
+                    guard !self.didSendFinal, !self.didCancel else { return }
+                    self.didSendFinal = true
                     self.onFinalResult?(text)
-                    self.stop()
+                    self.teardownAudio()
                 }
             }
             if let error {
@@ -99,22 +108,32 @@ public final class AppleSpeechService: NSObject, SpeechRecognitionService {
     }
 
     public func stop() {
-        audioEngine.inputNode.removeTap(onBus: 0)
-        audioEngine.stop()
-        request?.endAudio()
-        task?.finish()
-        request = nil
-        task = nil
-        recognizer = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        if !lastPartial.isEmpty { onFinalResult?(lastPartial) }
+        // 改动 8：stop() 保证 final 恰好回一次，且空串也回（由上层判空决定是否弹卡片）
+        guard !didSendFinal else { return }
+        didSendFinal = true
+        teardownAudio()
+        onFinalResult?(lastPartial)
     }
 
     public func cancel() {
+        // 改动 8：cancel 不置 didSendFinal，也不回调 final（用户主动取消不算识别）
+        didCancel = true
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
         request?.endAudio()
         task?.cancel()
+        request = nil
+        task = nil
+        recognizer = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// 仅回收音频与识别资源，不触发任何回调
+    private func teardownAudio() {
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        request?.endAudio()
+        task?.finish()
         request = nil
         task = nil
         recognizer = nil

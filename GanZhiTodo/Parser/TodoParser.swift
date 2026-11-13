@@ -95,8 +95,9 @@ public enum TodoParser {
         var relativeInterval: TimeInterval? = nil
 
         // ---- 1. 提醒提前量 ----
-        if let hit = firstHit(#"(提前|提早)\s*([0-9一二两三四五六七八九十半]+)\s*(分钟|分|小时|钟头|天|日|周|个?星期|个?月)\s*(提醒|通知|叫我|喊我)?"#, in: ns) {
-            let num = quantity(hit.groups[2] ?? "") ?? 0
+        if let hit = firstHit(#"(提前|提早)[\s,，。、~·]*(半个|[0-9一二两三四五六七八九十半]+)[\s,，。、~·]*(分钟|分|小时|钟头|天|日|周|个?星期|个?月)[\s,，。、~·]*(提醒|通知|叫我|喊我)?"#, in: ns) {
+            let numStr = (hit.groups[2] ?? "").hasPrefix("半个") ? "半" : (hit.groups[2] ?? "")
+            let num = quantity(numStr) ?? 0
             let unit = hit.groups[3] ?? "分钟"
             var minutes = 0.0
             if unit.contains("分钟") || unit.contains("分") { minutes = num }
@@ -110,7 +111,7 @@ public enum TodoParser {
 
         // ---- 2. 具体时刻 ----
         // 2a. 14:30 / 9：05
-        if let hit = firstHit(#"(上午|早上|早晨|清晨|中午|下午|傍晚|晚上|夜里|晚间|凌晨)?\s*([0-9]{1,2})\s*[:：]\s*([0-9]{2})"#, in: ns) {
+        if let hit = firstHit(#"(上午|早上|早晨|清晨|中午|下午|傍晚|晚上|夜里|晚间|凌晨)?[\s,，。、~·]*([0-9]{1,2})[\s,，。、~·]*[:：][\s,，。、~·]*([0-9]{2})"#, in: ns) {
             hour = Int(hit.groups[2] ?? "") ?? 0
             minute = Int(hit.groups[3] ?? "") ?? 0
             hour = applyPeriod(hit.groups[1] ?? "", to: hour ?? 0)
@@ -119,7 +120,7 @@ public enum TodoParser {
         }
         // 2b. 下午三点 / 晚上八点半 / 十点一刻
         if hour == nil,
-           let hit = firstHit(#"(上午|早上|早晨|清晨|中午|下午|傍晚|晚上|夜里|晚间|凌晨)?\s*([0-9]{1,2}|[一二两三四五六七八九十]{1,3})\s*[点時时]\s*(半|一刻|三刻|[0-9]{1,2}\s*分?)?"#, in: ns) {
+           let hit = firstHit(#"(上午|早上|早晨|清晨|中午|下午|傍晚|晚上|夜里|晚间|凌晨)?[\s,，。、~·]*([0-9]{1,2}|[一二两三四五六七八九十]{1,3})[\s,，。、~·]*[点時时][\s,，。、~·]*(半|一刻|三刻|[0-9]{1,2}[\s,，。、~·]*分?)?"#, in: ns) {
             if let h = intValue(hit.groups[2] ?? "") {
                 hour = applyPeriod(hit.groups[1] ?? "", to: h)
                 let tail = hit.groups[3] ?? ""
@@ -135,7 +136,7 @@ public enum TodoParser {
         }
         // 2b2. 约数时间（增强规格 5）：晚上八九点 / 下午三四点 → 取第一个数字
         if hour == nil,
-           let hit = firstHit(#"(上午|早上|早晨|清晨|中午|下午|傍晚|晚上|夜里|晚间|凌晨)?\s*([一二两三四五六七八九十])\s*([一二两三四五六七八九十])\s*[点時时]"#, in: ns) {
+           let hit = firstHit(#"(上午|早上|早晨|清晨|中午|下午|傍晚|晚上|夜里|晚间|凌晨)?[\s,，。、~·]*([一二两三四五六七八九十])[\s,，。、~·]*([一二两三四五六七八九十])[\s,，。、~·]*[点時时]"#, in: ns) {
             if let h = intValue(hit.groups[2] ?? "") {
                 hour = applyPeriod(hit.groups[1] ?? "", to: h)
                 explicitTime = true
@@ -169,23 +170,28 @@ public enum TodoParser {
             removeRanges.append(hit.range)
         }
 
-        // 3a2. 周末类（增强规格 1）：周末 → 最近的周六（今天即周六/周日则取今天）；下周末 → 下周的周六
+        // 3a2. 周末类（改动 8 修订口径）：
+        //   周末   → 最近的周六（今天已是周六/周日 → 取下一个周六）
+        //   这周末 → 本周六（已过则取今天，不回溯过去）
+        //   下周末 → 下周的周六；下下周末 → 下下周的周六
         if dayDate == nil,
-           let hit = firstHit(#"(下下)?周末"#, in: ns) {
+           let hit = firstHit(#"(下下|下|这)?周末"#, in: ns) {
             let prefix = hit.groups[1] ?? ""
             let todayIndex = { () -> Int in
                 let rawToday = (nowComps.weekday ?? 2) - 2       // 周一=0 … 周日=6
                 return rawToday < 0 ? 6 : rawToday
             }()
             var delta: Int
-            if prefix == "下下" {
-                delta = 5 - todayIndex + 14                       // 下下周六
-            } else if prefix == "下" {
-                delta = 5 - todayIndex + 7                        // 下周六
-            } else if todayIndex == 5 || todayIndex == 6 {
-                delta = 0                                         // 今天就是周末，取今天
-            } else {
-                delta = (5 - todayIndex + 7) % 7                  // 最近（未来）的周六
+            switch prefix {
+            case "下下":
+                delta = 5 - todayIndex + 14                      // 下下周六
+            case "下":
+                delta = 5 - todayIndex + 7                       // 下周六
+            case "这":
+                delta = max(0, 5 - todayIndex)                   // 本周六；已过不回溯
+            default:
+                let d = (5 - todayIndex + 7) % 7
+                delta = d == 0 ? 7 : d                           // 今天是周六 → 下个周六；周日 → 下个周六
             }
             dayDate = cal.date(byAdding: .day, value: delta, to: cal.startOfDay(for: now))
             removeRanges.append(hit.range)
@@ -204,7 +210,7 @@ public enum TodoParser {
 
         // 3b. 周几
         if dayDate == nil,
-           let hit = firstHit(#"(下下|下|本|这|上)?\s*(周|星期|礼拜)\s*([一二三四五六日天末1-7])"#, in: ns) {
+           let hit = firstHit(#"(下下|下|本|这|上)?[\s,，。、~·]*(周|星期|礼拜)[\s,，。、~·]*([一二三四五六日天末1-7])"#, in: ns) {
             let prefix = hit.groups[1] ?? ""
             let dayChar = hit.groups[3] ?? ""
             if let targetIndex = weekdayIndex(dayChar) {
@@ -225,8 +231,9 @@ public enum TodoParser {
 
         // 3c. 3天后 / 两个小时后 / 半小时后
         if dayDate == nil,
-           let hit = firstHit(#"([0-9一二两三四五六七八九十半]+)\s*(分钟|分|小时|钟头|天|日|周|个?星期|个?月)\s*(以后|之后|后|内)"#, in: ns) {
-            let num = quantity(hit.groups[1] ?? "") ?? 0
+           let hit = firstHit(#"(半个|[0-9一二两三四五六七八九十半]+)[\s,，。、~·]*(分钟|分|小时|钟头|天|日|周|个?星期|个?月)[\s,，。、~·]*(以后|之后|后|内)"#, in: ns) {
+            let numStr2 = (hit.groups[1] ?? "").hasPrefix("半个") ? "半" : (hit.groups[1] ?? "")
+            let num = quantity(numStr2) ?? 0
             let unit = hit.groups[2] ?? ""
             if unit.contains("分钟") || unit.contains("分") { relativeInterval = num * 60 }
             else if unit.contains("小时") || unit.contains("钟头") { relativeInterval = num * 3600 }
@@ -238,7 +245,7 @@ public enum TodoParser {
 
         // 3d. 11月20号 / 十一月二十日（可带年份）
         if dayDate == nil,
-           let hit = firstHit(#"(明年|今年|后年)?\s*([0-9]{1,2}|[一二三四五六七八九十]{1,3})\s*月\s*([0-9]{1,2}|[一二三四五六七八九十]{1,3})\s*[日号]?\s*(之前|以前|前|截止)?"#, in: ns) {
+           let hit = firstHit(#"(明年|今年|后年)?[\s,，。、~·]*([0-9]{1,2}|[一二三四五六七八九十]{1,3})[\s,，。、~·]*月[\s,，。、~·]*([0-9]{1,2}|[一二三四五六七八九十]{1,3})[\s,，。、~·]*[日号]?[\s,，。、~·]*(之前|以前|前|截止)?"#, in: ns) {
             if let m = intValue(hit.groups[2] ?? ""), let d = intValue(hit.groups[3] ?? ""), (1...12).contains(m), (1...31).contains(d) {
                 var year = nowComps.year ?? 2026
                 let yearWord = hit.groups[1] ?? ""
@@ -254,7 +261,7 @@ public enum TodoParser {
 
         // 3e. 下个月 5 号
         if dayDate == nil,
-           let hit = firstHit(#"下个?月\s*([0-9]{1,2}|[一二三四五六七八九十]{1,3})\s*[日号]\s*(之前|以前|前|截止)?"#, in: ns) {
+           let hit = firstHit(#"下个?月[\s,，。、~·]*([0-9]{1,2}|[一二三四五六七八九十]{1,3})[\s,，。、~·]*[日号][\s,，。、~·]*(之前|以前|前|截止)?"#, in: ns) {
             if let d = intValue(hit.groups[1] ?? "") {
                 var comps = DateComponents(year: nowComps.year, month: (nowComps.month ?? 1) + 1, day: d, hour: 9)
                 comps.timeZone = GanzhiCalendar.beijing
