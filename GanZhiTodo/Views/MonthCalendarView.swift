@@ -1,8 +1,10 @@
 //
 //  MonthCalendarView.swift
-//  首页（改动 7-B）：年月标题 + 本命四柱概览 + 大运条 + 月历 + 最近待办 + 底部录入栏
+//  首页（改动 7-B + 设计稿改版）：大号年月标题 + 即时排盘‖个人命盘（眼睛开关+大运） + 月历 + 最近待办 + 底部录入栏
 //  改动 4：月份切换为上下方向（右上两枚纵向按钮 + 日历垂直拖动）
 //  改动 5：节气名（朱砂小字）/ 法定假日（红数字+右下红点）/ 调休上班日（右上「班」角标）
+//  设计稿改版：① 大字年月两行标题 ② 即时排盘/个人命盘双栏 + 眼睛显示隐藏命盘与大运
+//              ③ 月历上移、字号放大 ④ 今日红圆底白字
 //  硬规则：首页不得出现任何刑冲合害连线或关系文字。
 //
 
@@ -43,30 +45,20 @@ struct MonthCalendarView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 MonthHeaderView()
-                    .padding(.top, 10)
+                    .padding(.top, 8)
 
-                // 改动 7-B2：八字概览面板（概览态，无连线）
-                BaZiBoardView(data: BaZiBoardData(for: app.selectedDay,
-                                                  chart: app.birthChart,
-                                                  lateZi: app.lateZiCountsAsNextDay),
-                              showsRelationLines: false)
-                    .padding(.top, 14)
+                // 设计稿改版 ②：即时排盘 ‖ 个人命盘（眼睛开关）+ 大运
+                HomeBoardView()
+                    .padding(.top, 12)
 
-                // 改动 7-B3：大运条
-                if app.birthChart != nil {
-                    Hairline().padding(.top, 4)
-                    DayunBarView()
-                        .padding(.top, 11)
-                }
-
-                // 改动 7-B4 + 改动 4：月历网格（垂直拖动切月）
+                // 改动 7-B4 + 改动 4：月历网格（垂直拖动切月；设计稿改版 ③ 上移+放大）
                 WeekdayHeader()
-                    .padding(.top, 14)
+                    .padding(.top, 12)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7),
-                          spacing: 4) {
+                          spacing: 6) {
                     ForEach(weeks.flatMap { $0 }) { info in
                         if info.isPlaceholder {
-                            Color.clear.frame(height: 36)
+                            Color.clear.frame(height: 42)
                         } else {
                             NavigationLink(value: info.date) {
                                 DayCellView(info: info)
@@ -76,12 +68,12 @@ struct MonthCalendarView: View {
                         }
                     }
                 }
-                .padding(.top, 6)
+                .padding(.top, 4)
                 .gesture(monthDragGesture)
 
                 // 改动 7-B5：最近待办
                 RecentTodosView()
-                    .padding(.top, 14)
+                    .padding(.top, 12)
             }
             .padding(.horizontal, Theme.hPadding)
             .padding(.bottom, 24)
@@ -156,7 +148,7 @@ struct MonthCalendarView: View {
     }
 }
 
-// MARK: - 月标题（改动 7-B1 + 改动 4）
+// MARK: - 月标题（改动 7-B1 + 改动 4 + 设计稿改版 ①：大字两行年月）
 
 struct MonthHeaderView: View {
 
@@ -169,17 +161,26 @@ struct MonthHeaderView: View {
 
     var body: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(titleText)
-                    .font(.system(size: 23, weight: .semibold))
-                    .letterSpacingCompat(0.4)
+            VStack(alignment: .leading, spacing: 0) {
+                // 年：中号
+                Text("\(yearInt) 年")
+                    .font(.system(size: 21, weight: .semibold))
+                    .letterSpacingCompat(0.5)
+                // 月：特大号粗体
+                Text("\(monthInt)月")
+                    .font(.system(size: 44, weight: .bold))
+                    .letterSpacingCompat(0.5)
+                    .padding(.top, 2)
+                // 干支行
                 Text("\(headerPillars.year.text)年 · \(headerPillars.month.text)月")
-                    .font(Theme.ganzhi(12.5))
+                    .font(Theme.ganzhi(13))
                     .foregroundStyle(Theme.secondaryText)
+                    .padding(.top, 8)
                 // 分钟级刷新只更新这一行文字（性能红线：不触发面板重算）
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     nowLine(context.date)
                 }
+                .padding(.top, 3)
             }
             Spacer()
             // 改动 4：两枚纵向圆形按钮，上=上一月、下=下一月
@@ -204,6 +205,13 @@ struct MonthHeaderView: View {
         }
     }
 
+    private var yearInt: Int {
+        GanzhiCalendar.calendar.component(.year, from: app.visibleMonth)
+    }
+    private var monthInt: Int {
+        GanzhiCalendar.calendar.component(.month, from: app.visibleMonth)
+    }
+
     private func nowLine(_ date: Date) -> some View {
         let cal = GanzhiCalendar.calendar
         let comps = cal.dateComponents([.hour, .minute], from: date)
@@ -211,13 +219,176 @@ struct MonthHeaderView: View {
         let hourBranch = ((comps.hour ?? 0) + 1) / 2 % 12
         return Text(String(format: "%02d:%02d · %@ %@", comps.hour ?? 0, comps.minute ?? 0,
                            pillars.hour.shichenName, GanZhiText.shichenRange[hourBranch]))
-            .font(.system(size: 10.5))
-            .foregroundStyle(Color(hexString: "#BDBDBD"))
+            .font(.system(size: 12))
+            .foregroundStyle(Color(hexString: "#B4B4B4"))
+    }
+}
+
+// MARK: - 首页排盘区（设计稿改版 ②：即时排盘 ‖ 个人命盘，眼睛开关命盘+大运）
+
+/// 双栏面板的一列数据
+struct HomeBoardColumn: Identifiable {
+    let id: Int
+    let title: String
+    let titleAccent: Bool        // 「日柱」朱砂
+    let stemIndex: Int?
+    let branchIndex: Int?
+}
+
+struct HomeBoardView: View {
+
+    @EnvironmentObject var app: AppModel
+    /// 眼睛开关：true = 显示个人命盘与大运（记忆到 UserDefaults）
+    @AppStorage("homeChartVisible") private var chartVisible = true
+
+    /// 即时排盘：当前时刻的 年柱(流年)/月柱(流月)/日柱(流日)/时柱(流时)
+    private var flowColumns: [HomeBoardColumn] {
+        let p = GanzhiCalendar.shared.fourPillars(for: Date(), lateZiCountsAsNextDay: app.lateZiCountsAsNextDay)
+        let items: [(String, Pillar)] = [("年柱", p.year), ("月柱", p.month), ("日柱", p.day), ("时柱", p.hour)]
+        return items.enumerated().map { i, pair in
+            HomeBoardColumn(id: i, title: pair.0, titleAccent: pair.0 == "日柱",
+                            stemIndex: pair.1.stemIndex, branchIndex: pair.1.branchIndex)
+        }
     }
 
-    private var titleText: String {
-        let comps = GanzhiCalendar.calendar.dateComponents([.year, .month], from: app.visibleMonth)
-        return "\(comps.year ?? 0)年\(comps.month ?? 1)月"
+    /// 个人命盘：本命四柱（时柱可选）
+    private var chartColumns: [HomeBoardColumn] {
+        guard let chart = app.birthChart else { return [] }
+        let items: [(String, Pillar?)] = [("年柱", chart.yearPillar), ("月柱", chart.monthPillar),
+                                          ("日柱", chart.dayPillar), ("时柱", chart.hourPillar)]
+        return items.enumerated().map { i, pair in
+            HomeBoardColumn(id: i, title: pair.0, titleAccent: pair.0 == "日柱",
+                            stemIndex: pair.1?.stemIndex, branchIndex: pair.1?.branchIndex)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
+                // 左：即时排盘
+                VStack(spacing: 0) {
+                    sectionTitle("即时排盘")
+                    boardBody(flowColumns)
+                }
+                .frame(maxWidth: .infinity)
+
+                // 右：个人命盘 + 眼睛
+                VStack(spacing: 0) {
+                    sectionTitleWithEye("个人命盘")
+                    if !chartVisible {
+                        hiddenPlaceholder
+                    } else if app.birthChart == nil {
+                        noChartGuide
+                    } else {
+                        boardBody(chartColumns)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            // 大运：仅当眼睛睁开且有命盘时显示
+            if chartVisible, app.birthChart != nil {
+                DayunBarView()
+                    .padding(.top, 10)
+            }
+        }
+    }
+
+    // MARK: 区块标题（左：无眼睛；右：带眼睛开关）
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Color(hexString: "#5C5852"))
+            .frame(height: 20, alignment: .bottom)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func sectionTitleWithEye(_ text: String) -> some View {
+        HStack(spacing: 5) {
+            Text(text)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color(hexString: "#5C5852"))
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { chartVisible.toggle() }
+            } label: {
+                Image(systemName: chartVisible ? "eye" : "eye.slash")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(chartVisible ? Theme.accent : Color(hexString: "#9B9B9B"))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(height: 20, alignment: .bottom)
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: 四柱面板（列标题 / 天干 / 地支，五行着色）
+
+    private func boardBody(_ columns: [HomeBoardColumn]) -> some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 0) {
+                ForEach(columns) { col in
+                    Text(col.title)
+                        .font(.system(size: 9))
+                        .foregroundStyle(col.titleAccent ? Theme.accent : Theme.secondaryText)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            HStack(spacing: 0) {
+                ForEach(columns) { col in
+                    Text(col.stemIndex.map { GanZhiText.stems[$0] } ?? "—")
+                        .font(Theme.ganzhi(20))
+                        .foregroundStyle(elementColor(col.stemIndex, isStem: true))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 25)
+            HStack(spacing: 0) {
+                ForEach(columns) { col in
+                    Text(col.branchIndex.map { GanZhiText.branches[$0] } ?? "—")
+                        .font(Theme.ganzhi(20))
+                        .foregroundStyle(elementColor(col.branchIndex, isStem: false))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 25)
+        }
+        .padding(.top, 7)
+    }
+
+    private func elementColor(_ index: Int?, isStem: Bool) -> Color {
+        guard let index else { return Theme.secondaryText.opacity(0.4) }
+        return Theme.element(isStem ? WuXing.ofStem(index) : WuXing.ofBranch(index))
+    }
+
+    // MARK: 眼睛关闭时的占位（与面板同高，布局不跳动）
+
+    private var hiddenPlaceholder: some View {
+        Text("八字已隐藏")
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.secondaryText.opacity(0.7))
+            .frame(maxWidth: .infinity)
+            .frame(height: 85, alignment: .center)
+    }
+
+    // MARK: 未录入八字引导
+
+    private var noChartGuide: some View {
+        VStack(spacing: 7) {
+            Text("未录入八字")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.secondaryText.opacity(0.7))
+            NavigationLink {
+                BirthChartEditorView()
+            } label: {
+                Text("去录入 ›")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 85, alignment: .center)
     }
 }
 
@@ -229,7 +400,7 @@ struct WeekdayHeader: View {
         HStack {
             ForEach(Array(labels.enumerated()), id: \.offset) { _, label in
                 Text(label)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.secondaryText)
                     .frame(maxWidth: .infinity)
             }
@@ -237,7 +408,7 @@ struct WeekdayHeader: View {
     }
 }
 
-// MARK: - 日期单元格（改动 7-B4 + 改动 5）
+// MARK: - 日期单元格（改动 7-B4 + 改动 5 + 设计稿改版 ③④：放大、今日红圆底白字）
 
 struct DayCellView: View {
 
@@ -249,24 +420,28 @@ struct DayCellView: View {
     }
 
     var body: some View {
-        VStack(spacing: 1) {
-            // 日期数字：法定假日 → 朱砂红；今日 → 朱砂
+        VStack(spacing: 2) {
+            // 日期数字：今日 → 朱砂圆底白字（设计稿改版 ④）；法定假日 → 朱砂红
             Text("\(info.dayNumber)")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(numberColor)
+                .font(.system(size: 15.5, weight: isToday ? .semibold : .medium))
+                .foregroundStyle(isToday ? Color.white : numberColor)
+                .frame(width: 27, height: 27)
+                .background(
+                    Circle().fill(isToday ? Theme.accent : Color.clear)
+                )
             // 下方小字：节气日显示节气名（朱砂），否则日柱
             if let term = info.termName {
                 Text(term)
-                    .font(.system(size: 7.5, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Theme.accent)
             } else {
                 Text(info.dayPillar.text)
-                    .font(Theme.ganzhi(7.5))
+                    .font(Theme.ganzhi(9))
                     .foregroundStyle(Theme.secondaryText)
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 36)
+        .frame(height: 42)
         .contentShape(Rectangle())
         // 有待办：右上 3pt 圆点（距右 12、距顶 6）
         .overlay(alignment: .topTrailing) {
@@ -274,29 +449,29 @@ struct DayCellView: View {
                 Circle()
                     .fill(Color(hexString: "#CFCBC4"))
                     .frame(width: 3, height: 3)
-                    .padding(.top, 6)
+                    .padding(.top, 5)
                     .padding(.trailing, 12)
             }
         }
-        // 调休上班日：右上角「班」角标（灰描边小圆 + 6pt 字）
+        // 调休上班日：右上角「班」角标（灰描边小圆 + 6.5pt 字）
         .overlay(alignment: .topTrailing) {
             if info.holidayType == .workday {
                 Text("班")
-                    .font(.system(size: 6))
+                    .font(.system(size: 6.5))
                     .foregroundStyle(Theme.secondaryText)
-                    .frame(width: 10, height: 10)
+                    .frame(width: 11, height: 11)
                     .overlay(Circle().stroke(Theme.secondaryText.opacity(0.5), lineWidth: 0.6))
-                    .padding(.top, 1)
-                    .padding(.trailing, 2)
+                    .padding(.top, 0)
+                    .padding(.trailing, 1)
             }
         }
-        // 法定放假日：右下角小红点（与右上待办圆点分居两侧，不重叠）
+        // 法定放假日：右下角小红点（与右上待办圆点分居两侧，不重叠；今日红圆底时不重复标点）
         .overlay(alignment: .bottomTrailing) {
-            if info.holidayType == .holiday {
+            if info.holidayType == .holiday && !isToday {
                 Circle()
                     .fill(Theme.accent)
                     .frame(width: 3, height: 3)
-                    .padding(.bottom, 3)
+                    .padding(.bottom, 2)
                     .padding(.trailing, 12)
             }
         }
@@ -304,7 +479,6 @@ struct DayCellView: View {
 
     private var numberColor: Color {
         if info.holidayType == .holiday { return Theme.accent }   // 法定假日 → 朱砂红
-        if isToday { return Theme.accent }                        // 今日 → 朱砂
         return .primary
     }
 }
