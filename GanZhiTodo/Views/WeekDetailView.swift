@@ -13,6 +13,8 @@ struct WeekDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedDay: Date
+    /// 切周过渡：只用 0.18s 淡入淡出，不做整页横移
+    @State private var weekOpacity: Double = 1
 
     init(day: Date) {
         _selectedDay = State(initialValue: day.startOfBeijingDay)
@@ -73,30 +75,34 @@ struct WeekDetailView: View {
                 }
                 .padding(.top, 6)
 
-                // C2 周条（7 列等分，原地切换）
-                weekStrip
-                    .padding(.top, 14)
+                // C2 周条（7 列等分，原地切换）；左右滑切周（改动 7-F5）
+                VStack(alignment: .leading, spacing: 0) {
+                    weekStrip
+                        .padding(.top, 14)
+                        .simultaneousGesture(weekSwipe)
 
-                // C3 八字面板 + 连线（以选中日为流日）
-                BaZiBoardView(data: BaZiBoardData(for: selectedDay,
-                                                  chart: app.birthChart,
-                                                  lateZi: app.lateZiCountsAsNextDay),
-                              showsRelationLines: true)
-                    .padding(.top, 14)
+                    // C3 八字面板 + 连线（以选中日为流日）
+                    BaZiBoardView(data: BaZiBoardData(for: selectedDay,
+                                                      chart: app.birthChart,
+                                                      lateZi: app.lateZiCountsAsNextDay),
+                                  showsRelationLines: true)
+                        .padding(.top, 14)
 
-                // 大运条紧随面板
-                if app.birthChart != nil {
-                    DayunBarView()
-                        .padding(.top, 11)
+                    // 大运条紧随面板
+                    if app.birthChart != nil {
+                        DayunBarView()
+                            .padding(.top, 11)
 
-                    // E 刑冲合害文字说明
-                    RelationNoteView(hits: relationHits)
+                        // E 刑冲合害文字说明
+                        RelationNoteView(hits: relationHits)
+                            .padding(.top, 16)
+                    }
+
+                    // 本周待办
+                    weekTodoSection
                         .padding(.top, 16)
                 }
-
-                // 本周待办
-                weekTodoSection
-                    .padding(.top, 16)
+                .opacity(weekOpacity)
             }
             .padding(.horizontal, Theme.hPadding)
             .padding(.bottom, 24)
@@ -110,6 +116,38 @@ struct WeekDetailView: View {
     private var monthText: String {
         let comps = GanzhiCalendar.calendar.dateComponents([.month], from: selectedDay)
         return "\(comps.month ?? 0)月"
+    }
+
+    // MARK: 改动 7-F5：左右滑切周（左滑=下一周，右滑=上一周）
+
+    private var weekSwipe: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onEnded { value in
+                // 左边缘 24pt 内让给系统返回手势
+                guard value.startLocation.x >= 24 else { return }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                guard abs(dx) > abs(dy) * 1.5, abs(dx) > 44 else { return }
+                shiftWeek(by: dx < 0 ? 1 : -1)
+            }
+    }
+
+    /// 切周：±7 天保持星期几；1900–2100 之外静默忽略；0.18s 淡入淡出
+    private func shiftWeek(by offset: Int) {
+        let cal = GanzhiCalendar.calendar
+        guard let next = cal.date(byAdding: .day, value: 7 * offset, to: selectedDay) else { return }
+        let year = cal.component(.year, from: next)
+        guard year >= 1900, year <= 2100 else { return }
+
+        selectedDay = next
+        // 跨月切周后返回首页，首页要停在该周所属月份
+        app.visibleMonth = next.startOfBeijingDay
+
+        weekOpacity = 0
+        // 先落地归零帧，再淡入（否则两次更新会被合并、看不到过渡）
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.18)) { weekOpacity = 1 }
+        }
     }
 
     // MARK: 周条

@@ -1,7 +1,7 @@
 //
 //  MonthCalendarView.swift
 //  首页（改动 7-B + 设计稿改版）：大号年月标题 + 即时排盘‖个人命盘（眼睛开关+大运） + 月历 + 最近待办 + 底部录入栏
-//  改动 4：月份切换为上下方向（右上两枚纵向按钮 + 日历垂直拖动）
+//  改动 4（新版）：月份切换为纯上下滑手势（右上箭头已删除）；点年月标题回今天所在月份
 //  改动 5：节气名（朱砂小字）/ 法定假日（红数字+右下红点）/ 调休上班日（右上「班」角标）
 //  设计稿改版：① 大字年月两行标题 ② 即时排盘/个人命盘双栏 + 眼睛显示隐藏命盘与大运
 //              ③ 月历上移、字号放大 ④ 今日红圆底白字
@@ -37,6 +37,12 @@ struct MonthCalendarView: View {
     @EnvironmentObject var store: TodoStore
     @EnvironmentObject var app: AppModel
 
+    // 改动 4（新版）：纯手势切月 —— 跟手位移 / 防连击 / 淡入过渡
+    @State private var monthDragOffset: CGFloat = 0
+    @State private var monthFadeOffset: CGFloat = 0
+    @State private var monthOpacity: Double = 1
+    @State private var isSwitchingMonth = false
+
     private var monthComps: DateComponents {
         GanzhiCalendar.calendar.dateComponents([.year, .month], from: app.visibleMonth)
     }
@@ -51,7 +57,7 @@ struct MonthCalendarView: View {
                 HomeBoardView()
                     .padding(.top, 12)
 
-                // 改动 7-B4 + 改动 4：月历网格（垂直拖动切月；设计稿改版 ③ 上移+放大）
+                // 改动 7-B4 + 改动 4（新版）：月历网格，上滑=下一月、下滑=上一月
                 WeekdayHeader()
                     .padding(.top, 12)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7),
@@ -69,9 +75,12 @@ struct MonthCalendarView: View {
                     }
                 }
                 .padding(.top, 4)
-                .gesture(monthDragGesture)
+                .opacity(monthOpacity)
+                .offset(y: monthDragOffset + monthFadeOffset)
+                // 必须用高优先级：外层 ScrollView 会先吃掉竖直拖动
+                .highPriorityGesture(monthSwipe)
 
-                // 改动 7-B5：最近待办
+                // 改动 7-B5：最近待办（此区域上下拖动仍是滚动页面）
                 RecentTodosView()
                     .padding(.top, 12)
             }
@@ -94,17 +103,57 @@ struct MonthCalendarView: View {
         }
     }
 
-    // MARK: 改动 4-2：垂直拖动切换月份（上滑=下一月，下滑=上一月）
+    // MARK: 改动 4（新版）：垂直拖动手势（上滑=下一月，下滑=上一月）
 
-    private var monthDragGesture: some Gesture {
-        DragGesture(minimumDistance: 30)
-            .onEnded { value in
-                if value.translation.height < -30 {
-                    app.moveMonth(by: 1)
-                } else if value.translation.height > 30 {
-                    app.moveMonth(by: -1)
-                }
+    private var monthSwipe: some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                // 只接竖直方向；横向划动不参与，避免劫持
+                guard abs(value.translation.height) > abs(value.translation.width) * 1.2 else { return }
+                monthDragOffset = max(-26, min(26, value.translation.height * 0.35))
             }
+            .onEnded { value in
+                let dy = value.translation.height
+                let dx = value.translation.width
+                guard !isSwitchingMonth else {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { monthDragOffset = 0 }
+                    return
+                }
+                guard abs(dy) > abs(dx) * 1.2, abs(dy) > 40 else {
+                    // 未达阈值：回弹，月份不变
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { monthDragOffset = 0 }
+                    return
+                }
+                switchMonth(by: dy < 0 ? 1 : -1)   // 上滑 → 下一月
+            }
+    }
+
+    /// 切月：换月 → 校正选中日 → 0.2s 淡入（不做整页横移/翻卡）
+    private func switchMonth(by offset: Int) {
+        isSwitchingMonth = true
+        monthDragOffset = 0
+        app.moveMonth(by: offset)
+
+        // 选中日若不在新月份，置为新月 1 日（避免随后推进别的月的周）
+        let cal = GanzhiCalendar.calendar
+        if !cal.isDate(app.selectedDay, equalTo: app.visibleMonth, toGranularity: .month),
+           let first = cal.date(from: cal.dateComponents([.year, .month], from: app.visibleMonth)) {
+            app.select(first)
+        }
+
+        monthFadeOffset = offset > 0 ? 10 : -10
+        monthOpacity = 0
+        // 先让「归零」这一帧落地，再淡入，否则两次状态更新会被合并成一帧、看不到过渡
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.2)) {
+                monthOpacity = 1
+                monthFadeOffset = 0
+            }
+        }
+        // 防连击：0.25s 内忽略新手势
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            isSwitchingMonth = false
+        }
     }
 
     // MARK: 生成网格
@@ -160,7 +209,9 @@ struct MonthHeaderView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top) {
+        // 改动 4（新版）：右上角不再有任何箭头/圆形按钮，顶部只留文字
+        VStack(alignment: .leading, spacing: 0) {
+            // 年月主标题：可点击回到今天所在月份（纯文字可点，无图标无下划线）
             VStack(alignment: .leading, spacing: 0) {
                 // 年：中号
                 Text("\(yearInt) 年")
@@ -171,38 +222,22 @@ struct MonthHeaderView: View {
                     .font(.system(size: 44, weight: .bold))
                     .letterSpacingCompat(0.5)
                     .padding(.top, 2)
-                // 干支行
-                Text("\(headerPillars.year.text)年 · \(headerPillars.month.text)月")
-                    .font(Theme.ganzhi(13))
-                    .foregroundStyle(Theme.secondaryText)
-                    .padding(.top, 8)
-                // 分钟级刷新只更新这一行文字（性能红线：不触发面板重算）
-                TimelineView(.periodic(from: .now, by: 30)) { context in
-                    nowLine(context.date)
-                }
-                .padding(.top, 3)
             }
-            Spacer()
-            // 改动 4：两枚纵向圆形按钮，上=上一月、下=下一月
-            VStack(spacing: 6) {
-                Button { app.moveMonth(by: -1) } label: {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color(hexString: "#9B9B9B"))
-                        .frame(width: 30, height: 30)
-                        .background(Circle().fill(Color.primary.opacity(0.035)))
-                }
-                .buttonStyle(.plain)
-                Button { app.moveMonth(by: 1) } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color(hexString: "#9B9B9B"))
-                        .frame(width: 30, height: 30)
-                        .background(Circle().fill(Color.primary.opacity(0.035)))
-                }
-                .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .onTapGesture { app.goToToday() }
+
+            // 干支行
+            Text("\(headerPillars.year.text)年 · \(headerPillars.month.text)月")
+                .font(Theme.ganzhi(13))
+                .foregroundStyle(Theme.secondaryText)
+                .padding(.top, 8)
+            // 分钟级刷新只更新这一行文字（性能红线：不触发面板重算）
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                nowLine(context.date)
             }
+            .padding(.top, 3)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var yearInt: Int {

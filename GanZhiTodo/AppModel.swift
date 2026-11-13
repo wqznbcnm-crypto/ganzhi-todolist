@@ -89,12 +89,11 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 切月（不带动画：过渡动画由月历视图统一控制，避免两层动画叠加发抖）
     func moveMonth(by offset: Int) {
         let cal = GanzhiCalendar.calendar
         if let next = cal.date(byAdding: .month, value: offset, to: visibleMonth) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                visibleMonth = next.startOfBeijingDay
-            }
+            visibleMonth = next.startOfBeijingDay
         }
     }
 
