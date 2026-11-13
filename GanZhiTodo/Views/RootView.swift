@@ -14,7 +14,8 @@ struct RootView: View {
         NavigationStack {
             MonthCalendarView()
                 .navigationDestination(for: Date.self) { day in
-                    DayDetailView(day: day)
+                    // 改动 7-F：点月历任一日期 → push 周详情页，该日为选中态
+                    WeekDetailView(day: day)
                 }
         }
         .sheet(item: $app.route) { route in

@@ -139,8 +139,7 @@ public enum TodoParser {
                 else if tail.contains("一刻") { minute = 15 }
                 else if tail.contains("三刻") { minute = 45 }
                 else if let m = Int(tail.replacingOccurrences(of: "分", with: "").trimmingCharacters(in: .whitespaces)) { minute = m }
-                // 增强规格 6：裸时刻（无时段词）且小时数 ≤ 6 按下午处理（两点半 → 14:30）
-                if let h = hour, (hit.groups[1] ?? "").isEmpty, h <= 6 { hour = h + 12 }
+                // 改动 9 口径修订：没给「上午/下午」→ 不猜（三点 → 03:00，卡片可改）
                 explicitTime = true
                 removeRanges.append(hit.range)
             }

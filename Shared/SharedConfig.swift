@@ -17,6 +17,14 @@ public enum AppGroupConfig {
     public static let speechEngineKey = "speechEngine"
     /// 默认提醒提前量（分钟）
     public static let defaultReminderKey = "defaultReminder"
+    /// 我的八字（改动 6-A）
+    public static let birthYearPillarKey = "birthYearPillar"
+    public static let birthMonthPillarKey = "birthMonthPillar"
+    public static let birthDayPillarKey = "birthDayPillar"
+    public static let birthHourPillarKey = "birthHourPillar"
+    public static let genderKey = "gender"
+    public static let birthYearKey = "birthYear"
+    public static let qiyunMonthsKey = "qiyunMonths"
     /// 数据文件名
     public static let todosFileName = "todos.json"
 

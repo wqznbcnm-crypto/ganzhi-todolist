@@ -28,6 +28,21 @@ enum Theme {
     static let secondaryText = Color.primary.opacity(0.45)
 }
 
+// MARK: - 五行配色（改动 6-D2：固定色，不随明暗模式变化）
+
+extension Theme {
+    /// 五行色：木绿、火红、土褐、金黄、水蓝（固定色）
+    static func element(_ e: WuXing) -> Color {
+        switch e {
+        case .wood:  return Color(red: 0.24, green: 0.55, blue: 0.30)   // #3D8C4D 木绿
+        case .fire:  return Color(red: 0.78, green: 0.20, blue: 0.16)   // #C73329 火红
+        case .earth: return Color(red: 0.60, green: 0.44, blue: 0.28)   // #997048 土褐
+        case .metal: return Color(red: 0.78, green: 0.60, blue: 0.18)   // #C7992E 金黄
+        case .water: return Color(red: 0.18, green: 0.37, blue: 0.66)   // #2E5EA8 水蓝
+        }
+    }
+}
+
 /// 细分割线
 struct Hairline: View {
     var body: some View {

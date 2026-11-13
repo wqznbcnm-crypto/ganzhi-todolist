@@ -51,6 +51,19 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 我的八字（改动 6）；nil = 未录入
+    @Published var birthChart: BirthChart? = BirthChart.load()
+
+    func saveBirthChart(_ chart: BirthChart) {
+        chart.save()
+        birthChart = chart
+    }
+
+    func clearBirthChart() {
+        BirthChart.clear()
+        birthChart = nil
+    }
+
     init() {
         let defaults = AppGroupConfig.sharedDefaults
         let engine = defaults.string(forKey: AppGroupConfig.speechEngineKey)

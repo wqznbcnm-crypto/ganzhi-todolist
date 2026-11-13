@@ -89,6 +89,8 @@ struct DayDetailView: View {
         let wd = weekdays[((comps.weekday ?? 1) - 1) % 7]
         var parts = [wd, "\(pillar.text)日"]
         if let term = GanzhiCalendar.shared.solarTermName(on: day) { parts.append(term) }
+        // 改动 5：当天在节假日数据表中 → 追加节日名
+        if let festival = HolidayCN.festivalName(for: day) { parts.append(festival) }
         return parts.joined(separator: " · ")
     }
 }

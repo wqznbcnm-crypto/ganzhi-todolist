@@ -23,6 +23,24 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 Section {
+                    NavigationLink {
+                        BirthChartEditorView()
+                    } label: {
+                        HStack {
+                            Text("我的八字")
+                            Spacer()
+                            Text(app.birthChart.map { "\($0.yearPillar.text) \($0.monthPillar.text) \($0.dayPillar.text)" + ($0.hourPillar.map { " \($0.text)" } ?? "") } ?? "未录入")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("八字排盘")
+                } footer: {
+                    Text("录入本命四柱后，首页与周详情页会显示流日/流月/流年/大运与本命四柱的对照面板。")
+                }
+
+                Section {
                     Picker("识别引擎", selection: $app.speechEngine) {
                         Text("自动（优先讯飞）").tag(SpeechEngine.auto.rawValue)
                         Text("科大讯飞").tag(SpeechEngine.iflytek.rawValue)
