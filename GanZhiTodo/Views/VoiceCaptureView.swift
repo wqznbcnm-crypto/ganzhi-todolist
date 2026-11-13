@@ -1,6 +1,8 @@
 //
 //  VoiceCaptureView.swift
-//  中文语音录入：录音 → 实时转写 → 自动解析事件/时间 → 校对 → 保存
+//  中文语音录入：录音 → 实时转写 → 自动解析事件/时间 → 确认卡片逐项校对 → 保存
+//  改动 3：录音结束不再直接入库，弹出「确认卡片」（事件/时间/提醒三行，逐项可点修改）；
+//          卡片顶部展示转写原文；底部为「保存 / 重录」两个按钮。
 //
 
 import SwiftUI
@@ -24,11 +26,14 @@ struct VoiceCaptureView: View {
     @State private var transcript = ""
     @State private var pulsing = false
 
-    // 解析结果（可键盘校对）
+    // 确认卡片状态（逐项可点修改）
     @State private var parsedTitle = ""
     @State private var hasDue = false
     @State private var dueDate = Date()
-    @State private var reminders: Set<Int> = []
+    @State private var showDatePicker = false
+    @State private var reminderMinutes: Int? = nil
+    @State private var showCustomReminder = false
+    @State private var customReminderText = ""
 
     @State private var service: (any SpeechRecognitionService)?
 
@@ -41,7 +46,7 @@ struct VoiceCaptureView: View {
                             .padding(.top, 28)
                         transcriptSection
                         if case .done = phase {
-                            correctionSection
+                            confirmCard
                         }
                         if case .error(let message) = phase {
                             errorBox(message)
@@ -63,6 +68,18 @@ struct VoiceCaptureView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { teardown(); dismiss() }
                 }
+            }
+            .alert("自定义提前提醒", isPresented: $showCustomReminder) {
+                TextField("提前多少分钟", text: $customReminderText)
+                    .keyboardType(.numberPad)
+                Button("确定") {
+                    if let m = Int(customReminderText.trimmingCharacters(in: .whitespaces)), m >= 0 {
+                        reminderMinutes = m
+                    }
+                }
+                Button("取消", role: .cancel) { }
+            } message: {
+                Text("填 0 表示准时提醒")
             }
         }
         .onAppear(perform: begin)
@@ -147,51 +164,123 @@ struct VoiceCaptureView: View {
         .softCard()
     }
 
-    // MARK: 校对区
+    // MARK: 确认卡片（改动 3）
 
-    private var correctionSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("事件").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.secondaryText)
+    private var confirmCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 卡片顶部：语音转写原文（浅灰小字，供核对）
+            Text("原文：\(transcript)")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Theme.secondaryText.opacity(0.8))
+                .lineLimit(2)
+                .padding(.bottom, 10)
+
+            // 第一行：事件（点击弹键盘可编辑）
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("事件")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 26, alignment: .leading)
                 TextField("要做什么", text: $parsedTitle, axis: .vertical)
                     .lineLimit(1...3)
-                    .font(.system(size: 17))
+                    .font(.system(size: 16))
             }
+            .padding(.vertical, 10)
 
-            Toggle("设置时间", isOn: $hasDue.animation())
-                .font(.system(size: 15))
-            if hasDue {
-                DatePicker("", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
-                    .labelsHidden()
-            }
+            Divider().overlay(Theme.secondaryText.opacity(0.18))
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("提醒").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.secondaryText)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(ReminderPreset.all) { preset in
-                            reminderChip(preset)
+            // 第二行：时间（点击弹出系统 DatePicker；可清除为「无日期」）
+            VStack(spacing: 8) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showDatePicker.toggle()
+                        if showDatePicker && !hasDue { hasDue = true }
+                    }
+                } label: {
+                    HStack {
+                        Text("时间")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.secondaryText)
+                            .frame(width: 26, alignment: .leading)
+                        Text(dueDisplayText)
+                            .font(.system(size: 16))
+                            .foregroundStyle(hasDue ? Color.primary : Theme.secondaryText)
+                        Spacer()
+                        if hasDue {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    hasDue = false
+                                    showDatePicker = false
+                                }
+                            } label: {
+                                Text("清除")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.accent)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.secondaryText)
                         }
                     }
                 }
+                .buttonStyle(.plain)
+                if showDatePicker {
+                    DatePicker("", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
+                        .labelsHidden()
+                        .onChange(of: dueDate) { _, _ in hasDue = true }
+                }
             }
+            .padding(.vertical, 10)
+
+            Divider().overlay(Theme.secondaryText.opacity(0.18))
+
+            // 第三行：提醒（点击弹出预设菜单 + 自定义分钟数）
+            HStack {
+                Text("提醒")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 26, alignment: .leading)
+                Menu {
+                    Button("不提醒") { reminderMinutes = nil }
+                    Button("准时提醒") { reminderMinutes = 0 }
+                    Button("提前 30 分钟") { reminderMinutes = 30 }
+                    Button("提前 1 小时") { reminderMinutes = 60 }
+                    Button("提前 1 天") { reminderMinutes = 1440 }
+                    Button("提前 5 天") { reminderMinutes = 7200 }
+                    Button("自定义分钟数…") {
+                        customReminderText = ""
+                        showCustomReminder = true
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(reminderDisplayText)
+                            .font(.system(size: 16))
+                            .foregroundStyle(reminderMinutes == nil ? Theme.secondaryText : Color.primary)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.vertical, 10)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.softFill))
     }
 
-    private func reminderChip(_ preset: ReminderPreset) -> some View {
-        let on = reminders.contains(preset.minutes)
-        return Button {
-            if on { reminders.remove(preset.minutes) } else { reminders.insert(preset.minutes) }
-        } label: {
-            Text(preset.title)
-                .font(.system(size: 12, weight: on ? .semibold : .regular))
-                .foregroundStyle(on ? Color.white : Color.primary)
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Capsule().fill(on ? Color.primary : Color(white: 0.9)))
-        }
-        .buttonStyle(.plain)
+    private var dueDisplayText: String {
+        guard hasDue else { return "无日期" }
+        let cal = GanzhiCalendar.calendar
+        let comps = cal.dateComponents([.month, .day, .hour, .minute], from: dueDate)
+        return String(format: "%d月%d日 %02d:%02d", comps.month ?? 1, comps.day ?? 1, comps.hour ?? 0, comps.minute ?? 0)
+    }
+
+    private var reminderDisplayText: String {
+        guard let m = reminderMinutes else { return "不提醒" }
+        return ReminderPreset.title(for: m)
     }
 
     private func errorBox(_ message: String) -> some View {
@@ -219,7 +308,7 @@ struct VoiceCaptureView: View {
         .softCard()
     }
 
-    // MARK: 底部按钮
+    // MARK: 底部按钮（listening → 完成；done → 重录 / 保存）
 
     private var actionBar: some View {
         HStack(spacing: 12) {
@@ -238,7 +327,7 @@ struct VoiceCaptureView: View {
                 Button {
                     restart()
                 } label: {
-                    Text("重新说")
+                    Text("重录")
                         .font(.system(size: 15, weight: .medium))
                         .frame(maxWidth: .infinity).frame(height: 52)
                         .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Theme.softFill))
@@ -311,6 +400,7 @@ struct VoiceCaptureView: View {
         svc.start()
     }
 
+    /// 转写+解析完成 → 弹出确认卡片（不直接入库）
     private func finalize(_ text: String) {
         transcript = text
         let parsed = TodoParser.parse(text, now: Date())
@@ -322,7 +412,8 @@ struct VoiceCaptureView: View {
             hasDue = false
             dueDate = (app.selectedDay).addingTimeInterval(9 * 3600)
         }
-        reminders = Set(parsed.reminderOffsets)
+        showDatePicker = false
+        reminderMinutes = parsed.reminderOffsets.first ?? app.defaultReminder
         if parsedTitle.isEmpty {
             parsedTitle = text
         }
@@ -333,16 +424,18 @@ struct VoiceCaptureView: View {
         service?.cancel()
         transcript = ""
         parsedTitle = ""
-        reminders = []
+        reminderMinutes = nil
+        showDatePicker = false
         startEngine()
     }
 
+    /// 保存：写入 TodoStore，并按选中的提醒设置通知（由 store.add 内部调度）
     private func save() {
         let trimmed = parsedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return }   // 转写为空/未填标题：不产生待办
         let item = TodoItem(title: trimmed,
                             dueDate: hasDue ? dueDate : nil,
-                            reminderOffsets: Array(reminders).sorted(),
+                            reminderOffsets: reminderMinutes.map { [$0] } ?? [],
                             allDay: !hasDue)
         store.add(item)
         dismiss()

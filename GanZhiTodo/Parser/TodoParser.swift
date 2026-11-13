@@ -127,6 +127,17 @@ public enum TodoParser {
                 else if tail.contains("一刻") { minute = 15 }
                 else if tail.contains("三刻") { minute = 45 }
                 else if let m = Int(tail.replacingOccurrences(of: "分", with: "").trimmingCharacters(in: .whitespaces)) { minute = m }
+                // 增强规格 6：裸时刻（无时段词）且小时数 ≤ 6 按下午处理（两点半 → 14:30）
+                if let h = hour, (hit.groups[1] ?? "").isEmpty, h <= 6 { hour = h + 12 }
+                explicitTime = true
+                removeRanges.append(hit.range)
+            }
+        }
+        // 2b2. 约数时间（增强规格 5）：晚上八九点 / 下午三四点 → 取第一个数字
+        if hour == nil,
+           let hit = firstHit(#"(上午|早上|早晨|清晨|中午|下午|傍晚|晚上|夜里|晚间|凌晨)?\s*([一二两三四五六七八九十])\s*([一二两三四五六七八九十])\s*[点時时]"#, in: ns) {
+            if let h = intValue(hit.groups[2] ?? "") {
+                hour = applyPeriod(hit.groups[1] ?? "", to: h)
                 explicitTime = true
                 removeRanges.append(hit.range)
             }
@@ -156,6 +167,39 @@ public enum TodoParser {
             if word.contains("晚") && hour == nil { hour = 20; explicitTime = true }
             if word.contains("早") && hour == nil { hour = 8; explicitTime = true }
             removeRanges.append(hit.range)
+        }
+
+        // 3a2. 周末类（增强规格 1）：周末 → 最近的周六（今天即周六/周日则取今天）；下周末 → 下周的周六
+        if dayDate == nil,
+           let hit = firstHit(#"(下下)?周末"#, in: ns) {
+            let prefix = hit.groups[1] ?? ""
+            let todayIndex = { () -> Int in
+                let rawToday = (nowComps.weekday ?? 2) - 2       // 周一=0 … 周日=6
+                return rawToday < 0 ? 6 : rawToday
+            }()
+            var delta: Int
+            if prefix == "下下" {
+                delta = 5 - todayIndex + 14                       // 下下周六
+            } else if prefix == "下" {
+                delta = 5 - todayIndex + 7                        // 下周六
+            } else if todayIndex == 5 || todayIndex == 6 {
+                delta = 0                                         // 今天就是周末，取今天
+            } else {
+                delta = (5 - todayIndex + 7) % 7                  // 最近（未来）的周六
+            }
+            dayDate = cal.date(byAdding: .day, value: delta, to: cal.startOfDay(for: now))
+            removeRanges.append(hit.range)
+        }
+
+        // 3a3. 月底类（增强规格 2）：月底 / 月底前 / 这个月月底 → 本月最后一天
+        if dayDate == nil,
+           let hit = firstHit(#"(这个月|本月)?月底(之?前|以前)?"#, in: ns) {
+            if let lastDay = cal.range(of: .day, in: .month, for: now)?.last {
+                var comps = DateComponents(year: nowComps.year, month: nowComps.month, day: lastDay, hour: 9)
+                comps.timeZone = GanzhiCalendar.beijing
+                dayDate = cal.date(from: comps)
+                removeRanges.append(hit.range)
+            }
         }
 
         // 3b. 周几
@@ -332,12 +376,31 @@ public enum TodoParser {
 
     static func stripFillers(_ text: String) -> String {
         var s = text
-        let fillers = ["提醒我", "记得", "帮我", "我要", "我想", "麻烦", "安排", "一下", "，", ",", "。", "、", "；", ";"]
+        let fillers = ["提醒我", "记得", "帮我", "我要", "我想", "麻烦", "安排", "，", ",", "。", "、", "；", ";"]
         for f in fillers {
             s = s.replacingOccurrences(of: f, with: " ")
         }
         s = s.replacingOccurrences(of: "  ", with: " ")
         s = s.replacingOccurrences(of: "  ", with: " ")
+        s = stripLeadingFillers(s)
         return s.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "，,。.、 ")))
+    }
+
+    /// 增强规格 7/8：剔除口语引导词与助动词前缀。
+    /// 规格里的「改天/回头/有空/尽快/以后 → 不设置 due」由主流程天然满足
+    /// （这些词不产生任何时间命中），此处只负责把它们从标题里去掉。
+    static func stripLeadingFillers(_ text: String) -> String {
+        var s = text.trimmingCharacters(in: .whitespaces)
+        let leading = ["改天", "回头", "有空", "尽快", "以后",
+                       "提醒我", "记得", "帮我", "麻烦", "让我", "需要", "要", "得"]
+        var changed = true
+        while changed {
+            changed = false
+            for w in leading where s.hasPrefix(w) && s.count > w.count {
+                s = String(s.dropFirst(w.count)).trimmingCharacters(in: .whitespaces)
+                changed = true
+            }
+        }
+        return s
     }
 }

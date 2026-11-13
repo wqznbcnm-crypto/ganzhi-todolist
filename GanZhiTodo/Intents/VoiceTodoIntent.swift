@@ -24,16 +24,18 @@ struct StartVoiceTodoIntent: AppIntent {
 }
 
 /// 注册给 Siri / 快捷指令 App 的短语
+/// 注意：苹果规定每条短语必须包含 \(.applicationName)，
+/// 因此纯单词（如 "Memo"）无法内置——个人唤醒词请用快捷指令 iCloud 链接分发。
 struct GanZhiTodoShortcuts: AppShortcutsProvider {
 
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: StartVoiceTodoIntent(),
             phrases: [
-                "在\(.applicationName)记一条待办",
-                "在\(.applicationName)语音记待办",
-                "\(.applicationName)小记一下",
-                "\(.applicationName)语音记待办"
+                "\(.applicationName)记一条待办",
+                "\(.applicationName)语音记待办",
+                "\(.applicationName)小记",
+                "\(.applicationName)memo"
             ],
             shortTitle: "语音记待办",
             systemImageName: "waveform"
