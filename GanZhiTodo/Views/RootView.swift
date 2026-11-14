@@ -13,8 +13,8 @@ struct RootView: View {
     var body: some View {
         NavigationStack {
             MonthCalendarView()
-                .navigationDestination(for: Date.self) { day in
-                    // 改动 7-F：点月历任一日期 → push 周详情页，该日为选中态
+                .navigationDestination(item: $app.pushedDay) { day in
+                    // 设计稿 v4：单击日期只看当天待办；**双击**日期才进周详情页
                     WeekDetailView(day: day)
                 }
         }

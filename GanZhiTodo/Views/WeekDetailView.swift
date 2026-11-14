@@ -1,7 +1,12 @@
 //
 //  WeekDetailView.swift
-//  周详情页（改动 7-C/D/E）：‹返回 + 日期范围 / 7 天周条 / 八字面板+连线 /
-//  大运条 / 刑冲合害文字说明 / 本周待办 / 右上角话筒（改动 9-F，anchor = 选中列）
+//  周详情页（改动 7-C/D/E + 设计稿 v4）：
+//    ‹返回 + 日期范围 / 7 天周条 / 排盘面板（即时排盘 ‖ 本人八字）/ 本周待办
+//
+//  设计稿 v4 变更：
+//    · 去掉常驻连线与整段刑冲合害说明 → 点某个干/支字弹层只看该字的关系
+//    · 去掉底部灰色大运条（DayunBarView 已删除）
+//    · 恢复系统左边缘右滑返回（页面隐藏了返回按钮，需手动启用系统手势）
 //
 
 import SwiftUI
@@ -15,6 +20,8 @@ struct WeekDetailView: View {
     @State private var selectedDay: Date
     /// 切周过渡：只用 0.18s 淡入淡出，不做整页横移
     @State private var weekOpacity: Double = 1
+    /// 点字后的关系弹层
+    @State private var relationPayload: RelationPayload?
 
     init(day: Date) {
         _selectedDay = State(initialValue: day.startOfBeijingDay)
@@ -42,6 +49,10 @@ struct WeekDetailView: View {
     private var weekItems: [TodoItem] {
         let days = Set(weekDays.map { $0.startOfBeijingDay })
         return store.items.filter { days.contains($0.calendarDay) }
+    }
+
+    private var boardData: BaZiBoardData {
+        BaZiBoardData(for: selectedDay, chart: app.birthChart, lateZi: app.lateZiCountsAsNextDay)
     }
 
     var body: some View {
@@ -75,28 +86,17 @@ struct WeekDetailView: View {
                 }
                 .padding(.top, 6)
 
-                // C2 周条（7 列等分，原地切换）；左右滑切周（改动 7-F5）
                 VStack(alignment: .leading, spacing: 0) {
+                    // C2 周条（7 列等分，原地切换）；左右滑切周（改动 7-F5）
                     weekStrip
                         .padding(.top, 14)
                         .simultaneousGesture(weekSwipe)
 
-                    // C3 八字面板 + 连线（以选中日为流日）
-                    BaZiBoardView(data: BaZiBoardData(for: selectedDay,
-                                                      chart: app.birthChart,
-                                                      lateZi: app.lateZiCountsAsNextDay),
-                                  showsRelationLines: true)
-                        .padding(.top, 14)
-
-                    // 大运条紧随面板
-                    if app.birthChart != nil {
-                        DayunBarView()
-                            .padding(.top, 11)
-
-                        // E 刑冲合害文字说明
-                        RelationNoteView(hits: relationHits)
-                            .padding(.top, 16)
+                    // C3 排盘面板：即时排盘 ‖ 本人八字；点字出关系弹层
+                    BaZiBoardView(data: boardData) { col, isStem in
+                        openRelation(col: col, isStem: isStem)
                     }
+                    .padding(.top, 14)
 
                     // 本周待办
                     weekTodoSection
@@ -111,11 +111,31 @@ struct WeekDetailView: View {
         .background(Color(.systemBackground))
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
+        .enableInteractivePopGesture()
+        .sheet(item: $relationPayload) { payload in
+            RelationSheetView(payload: payload)
+        }
     }
 
     private var monthText: String {
         let comps = GanzhiCalendar.calendar.dateComponents([.month], from: selectedDay)
         return "\(comps.month ?? 0)月"
+    }
+
+    // MARK: 点字 → 关系弹层
+
+    private func openRelation(col: Int, isStem: Bool) {
+        let data = boardData
+        let stemsText: [String?] = data.stems.map { $0.map { GanZhiText.stems[$0] } }
+        let branchesText: [String?] = data.branches.map { $0.map { GanZhiText.branches[$0] } }
+        let raw = isStem ? stemsText[col] : branchesText[col]
+        guard let char = raw else { return }
+
+        relationPayload = RelationPayload(target: RelationTarget(col: col, isStem: isStem, char: char),
+                                          hits: data.relationHits,
+                                          titles: BaZiBoardData.titles,
+                                          stems: stemsText,
+                                          branches: branchesText)
     }
 
     // MARK: 改动 7-F5：左右滑切周（左滑=下一周，右滑=上一周）
@@ -193,12 +213,6 @@ struct WeekDetailView: View {
         .onAppear { _ = today }   // 保留 today 供今日点标注扩展
     }
 
-    // MARK: 关系
-
-    private var relationHits: [RelationHit] {
-        BaZiBoardData(for: selectedDay, chart: app.birthChart, lateZi: app.lateZiCountsAsNextDay).relationHits
-    }
-
     // MARK: 本周待办
 
     private var weekTodoSection: some View {
@@ -255,7 +269,7 @@ struct WeekDetailView: View {
                     .foregroundStyle(Color(hexString: "#B3AEA7"))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text(item.isDone ? "已完成" : (item.timeText == "全天" ? "" : item.timeText))
+            Text(TodoRowText.sideLabel(item))
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(Color(hexString: "#B3AEA7"))
         }
@@ -263,123 +277,5 @@ struct WeekDetailView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.primary.opacity(0.04)).frame(height: 1)
         }
-    }
-}
-
-// MARK: - 刑冲合害文字说明（改动 7-E）
-
-struct RelationNoteView: View {
-
-    let hits: [RelationHit]
-
-    private var drawable: [RelationHit] { RelationEngine.drawable(hits) }
-    private var dropped: [RelationHit] { RelationEngine.droppedBySpan(hits) }
-
-    /// 组合串：按干支自然序排序，用「·」分隔
-    private func comboText(_ kind: RelationKind, isStem: Bool) -> String {
-        let relevant = drawable.filter { $0.kind == kind && $0.isStem == isStem }
-        let sorted = relevant.sorted { ($0.orderA, $0.orderB, $0.colA) < ($1.orderA, $1.orderB, $1.colA) }
-        let seen = NSOrderedSet(array: sorted.map(\.chars))
-        return (seen.array as? [String])?.joined(separator: " · ") ?? ""
-    }
-
-    private func count(_ kind: RelationKind) -> Int {
-        drawable.filter { $0.kind == kind }.count
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Hairline()
-            // 标题行 + 图例
-            HStack {
-                Text("刑冲合害")
-                    .font(.system(size: 11, weight: .semibold))
-                    .letterSpacingCompat(0.6)
-                    .foregroundStyle(Color(hexString: "#8B867E"))
-                Spacer()
-                HStack(spacing: 6) {
-                    Rectangle().fill(Theme.secondaryText).frame(width: 12, height: 1.3)
-                    Text("本命").font(.system(size: 9.5)).foregroundStyle(Color(hexString: "#B3AEA7"))
-                    Rectangle()
-                        .fill(Theme.secondaryText)
-                        .frame(width: 12, height: 1)
-                        .overlay(Rectangle().fill(.white).frame(width: 2.5).offset(x: 2.5))
-                        .clipShape(Rectangle())
-                    Text("流运").font(.system(size: 9.5)).foregroundStyle(Color(hexString: "#B3AEA7"))
-                }
-            }
-            .padding(.top, 12)
-            .padding(.bottom, 2)
-
-            ForEach(RelationKind.allCases, id: \.rawValue) { kind in
-                relationGroup(kind)
-            }
-
-            // 被跨度规则排除的长线（N = 0 时整行不显示）
-            if !dropped.isEmpty {
-                Text("另有 \(dropped.count) 处跨度较大的作用未连线")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.secondaryText.opacity(0.7))
-                    .padding(.top, 6)
-            }
-        }
-    }
-
-    private func relationGroup(_ kind: RelationKind) -> some View {
-        let n = count(kind)
-        let rgb = kind.colorRGB
-        let stemCombo = comboText(kind, isStem: true)
-        let branchCombo = comboText(kind, isStem: false)
-        let isEmpty = (n == 0)
-
-        return HStack(alignment: .top, spacing: 10) {
-            Text(kind.rawValue)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color(red: rgb.r, green: rgb.g, blue: rgb.b))
-                .opacity(isEmpty ? 0.35 : 1)
-                .frame(width: 16, alignment: .leading)
-
-            VStack(alignment: .leading, spacing: 2) {
-                if isEmpty {
-                    Text("无")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.secondaryText.opacity(0.6))
-                } else {
-                    if !branchCombo.isEmpty {
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Text("地支")
-                                .font(.system(size: 9.5))
-                                .foregroundStyle(Color(hexString: "#B3AEA7"))
-                                .frame(width: 22, alignment: .leading)
-                            Text(branchCombo)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(Color(hexString: "#3A3A3A"))
-                        }
-                    }
-                    if !stemCombo.isEmpty {
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Text("天干")
-                                .font(.system(size: 9.5))
-                                .foregroundStyle(Color(hexString: "#B3AEA7"))
-                                .frame(width: 22, alignment: .leading)
-                            Text(stemCombo)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(Color(hexString: "#3A3A3A"))
-                        }
-                    }
-                    Text(kind.explanation)
-                        .font(.system(size: 9.5))
-                        .lineSpacing(3)
-                        .foregroundStyle(Color(hexString: "#B3AEA7"))
-                        .padding(.top, 2)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text("\(n) 处")
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.secondaryText.opacity(0.6))
-        }
-        .padding(.vertical, 7)
     }
 }

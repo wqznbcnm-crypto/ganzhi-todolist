@@ -28,6 +28,24 @@ enum Theme {
     static let secondaryText = Color.primary.opacity(0.45)
 }
 
+// MARK: - 设计稿 v4 指定字体
+
+extension Theme {
+
+    /// 数字字体：Sinhala Sangam MN（iOS 系统内置）
+    /// 注意：该字体只覆盖拉丁字母、数字与标点，**不含汉字**；
+    /// 「年 / 月 / 日 / 时」这类汉字必须用 `puhui` 另起一段。
+    static func digit(_ size: CGFloat, bold: Bool = false) -> Font {
+        .custom(bold ? "SinhalaSangamMN-Bold" : "SinhalaSangamMN", size: size)
+    }
+
+    /// 中文与干支字体：Alibaba PuHuiTi（随包，Info.plist UIAppFonts 注册）
+    /// PostScript 名：AlibabaPuHuiTiB（Bold）/ AlibabaPuHuiTiL（Light）
+    static func puhui(_ size: CGFloat, bold: Bool = false) -> Font {
+        .custom(bold ? "AlibabaPuHuiTiB" : "AlibabaPuHuiTiL", size: size)
+    }
+}
+
 // MARK: - 五行配色（改动 6-D2：固定色，不随明暗模式变化）
 
 extension Theme {

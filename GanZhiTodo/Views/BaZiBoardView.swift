@@ -1,9 +1,14 @@
 //
 //  BaZiBoardView.swift
-//  八字排盘面板（改动 6-E）：流日｜流月｜流年｜大运 ‖ 年柱｜月柱｜日柱｜时柱
-//  三行：主星（十神）/ 天干 / 地支；五行着色；showsRelationLines = true 时
-//  在面板下方追加正交折线连线区（改动 7-D，仅周详情页使用）。
-//  性能红线：关系只在数据变化时重算，不放逐帧时钟里。
+//  八字排盘面板（改动 6-E / 设计稿 v4）：
+//    即时排盘（流日｜流月｜流年｜大运） ‖ 本人八字（年柱｜月柱｜日柱｜时柱）
+//  三行：主星（十神）/ 天干 / 地支；五行着色。
+//
+//  设计稿 v4 变更：
+//    · 两组之间加竖直分隔线 + 组标题，一眼能分出「即时排盘」与「本人八字」
+//    · 不再常驻连线；改为点击某个干/支字，弹出与该字相关的关系（sheet）
+//    · 底部灰色大运条（DayunBarView）已删除
+//    · 大运列取「当前所处那一步」（优先用户手动指定，其次按出生年 + 起运岁数推算）
 //
 
 import SwiftUI
@@ -29,6 +34,9 @@ struct BaZiBoardData {
     /// 大运列标题角标（未定 → "?"; nil = 无）
     let dayunBadge: String?
 
+    /// 列标题（固定 8 列）
+    static let titles = ["流日", "流月", "流年", "大运", "年柱", "月柱", "日柱", "时柱"]
+
     /// 从「选中日期 + 生辰」构建面板数据
     init(for day: Date, chart: BirthChart?, lateZi: Bool = true) {
         let pillars = GanzhiCalendar.shared.fourPillars(for: day, lateZiCountsAsNextDay: lateZi)
@@ -40,15 +48,16 @@ struct BaZiBoardData {
         stems[1] = pillars.month.stemIndex; branches[1] = pillars.month.branchIndex
         stems[2] = pillars.year.stemIndex; branches[2] = pillars.year.branchIndex
 
-        // 3 大运（当前步；未定 → 第 1 步）
+        // 3 大运：当前所处那一步（不再盲取第一步）
         var dayunBadge: String? = nil
         if let chart {
             let steps = DayunCalculator.steps(chart: chart)
-            let currentIndex = DayunCalculator.currentStepIndex(steps: steps)
-            let step = steps[currentIndex ?? 0]
-            stems[3] = step.pillar.stemIndex
-            branches[3] = step.pillar.branchIndex
-            if currentIndex == nil { dayunBadge = "?" }
+            if let index = DayunCalculator.resolvedIndex(chart: chart, list: steps) {
+                stems[3] = steps[index].pillar.stemIndex
+                branches[3] = steps[index].pillar.branchIndex
+            } else {
+                dayunBadge = "?"   // 既没指定也算不出：留空，而不是假装是第一步
+            }
         }
 
         // 4–7 本命四柱
@@ -77,7 +86,6 @@ struct BaZiBoardData {
     /// 面板列（未录入八字 → 空数组，面板显示引导态）
     var columns: [BoardColumn] {
         guard stems[4] != nil else { return [] }
-        let titles = ["流日", "流月", "流年", "大运", "年柱", "月柱", "日柱", "时柱"]
         return (0..<8).map { i in
             var god = ""
             if let ds = dayStemIndex, let s = stems[i] {
@@ -85,7 +93,7 @@ struct BaZiBoardData {
             }
             if i == 6 { god = dayMasterLabel }
             return BoardColumn(id: i,
-                               title: titles[i],
+                               title: Self.titles[i],
                                titleAccent: i == 3 || i == 6,
                                stem: stems[i].map { GanZhiText.stems[$0] },
                                branch: branches[i].map { GanZhiText.branches[$0] },
@@ -93,7 +101,7 @@ struct BaZiBoardData {
         }
     }
 
-    /// 关系命中（含 T3，供文字说明筛选）
+    /// 关系命中（含 T3）
     var relationHits: [RelationHit] {
         guard stems[4] != nil else { return [] }
         return RelationEngine.compute(stems: stems, branches: branches)
@@ -106,8 +114,8 @@ struct BaZiBoardView: View {
 
     @EnvironmentObject var app: AppModel
     let data: BaZiBoardData
-    /// 改动 6-E2-6：true 时在面板下方渲染连线区（仅周详情页）
-    var showsRelationLines: Bool = false
+    /// 点击某个干/支字：参数为（列序号 0–7，是否天干行）
+    var onTapChar: ((Int, Bool) -> Void)? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -117,29 +125,40 @@ struct BaZiBoardView: View {
             let hasChart = !data.columns.isEmpty
 
             if hasChart {
-                VStack(alignment: .leading, spacing: 0) {
-                    board(columns: data.columns, colWidth: colWidth, labelWidth: labelWidth)
-                    if showsRelationLines {
-                        RelationLinesView(hits: data.relationHits,
-                                          colWidth: colWidth, labelWidth: labelWidth)
-                    }
-                }
+                board(columns: data.columns, colWidth: colWidth, labelWidth: labelWidth)
             } else {
                 emptyGuide
             }
         }
-        .frame(minHeight: showsRelationLines ? 190 : 108)
+        .frame(height: 132)
     }
 
-    // MARK: 三行面板
+    // MARK: 组标题 + 三行面板
 
     private func board(columns: [BoardColumn], colWidth: CGFloat, labelWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
+            // 组标题：即时排盘 ‖ 本人八字（分隔线与下面的列分隔对齐）
+            HStack(spacing: 0) {
+                Text("即时排盘")
+                    .font(Theme.puhui(8.5))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.75))
+                    .frame(width: labelWidth + colWidth * 4, alignment: .leading)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.10))
+                    .frame(width: 1, height: 9)
+                Text("本人八字")
+                    .font(Theme.puhui(8.5))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.75))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding(.bottom, 3)
+
             // 列标题行
             HStack(spacing: 0) {
                 Text("")
                     .frame(width: labelWidth, alignment: .leading)
                 ForEach(columns) { col in
+                    if col.id == 4 { groupDivider(height: 12) }
                     Text(col.title)
                         .font(.system(size: 9.5))
                         .letterSpacing(0.4)
@@ -153,6 +172,7 @@ struct BaZiBoardView: View {
             HStack(spacing: 0) {
                 rowLabel("主星", width: labelWidth)
                 ForEach(columns) { col in
+                    if col.id == 4 { groupDivider(height: 18) }
                     Text(col.god)
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.secondaryText)
@@ -165,9 +185,8 @@ struct BaZiBoardView: View {
             HStack(spacing: 0) {
                 rowLabel("天干", width: labelWidth)
                 ForEach(columns) { col in
-                    Text(col.stem ?? "—")
-                        .font(Theme.ganzhi(23))
-                        .foregroundStyle(stemColor(col))
+                    if col.id == 4 { groupDivider(height: 30) }
+                    charCell(col.stem ?? "—", color: stemColor(col), col: col.id, isStem: true)
                         .frame(width: colWidth)
                 }
             }
@@ -177,15 +196,33 @@ struct BaZiBoardView: View {
             HStack(spacing: 0) {
                 rowLabel("地支", width: labelWidth)
                 ForEach(columns) { col in
-                    Text(col.branch ?? "—")
-                        .font(Theme.ganzhi(23))
-                        .foregroundStyle(branchColor(col))
+                    if col.id == 4 { groupDivider(height: 30) }
+                    charCell(col.branch ?? "—", color: branchColor(col), col: col.id, isStem: false)
                         .frame(width: colWidth)
                 }
             }
             .frame(height: 30)
-            .padding(.bottom, 9)
+            .padding(.bottom, 6)
         }
+    }
+
+    /// 单个干/支字：可点，点开与该字相关的关系弹层
+    private func charCell(_ text: String, color: Color, col: Int, isStem: Bool) -> some View {
+        Text(text)
+            .font(Theme.ganzhi(23))
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard text != "—" else { return }
+                onTapChar?(col, isStem)
+            }
+    }
+
+    private func groupDivider(height: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.10))
+            .frame(width: 1, height: height)
     }
 
     private func rowLabel(_ text: String, width: CGFloat) -> some View {
@@ -224,135 +261,6 @@ struct BaZiBoardView: View {
             Spacer()
         }
         .padding(.vertical, 18)
-    }
-}
-
-// MARK: - 连线区（改动 7-D，正交折线）
-
-struct RelationLinesView: View {
-
-    let hits: [RelationHit]
-    let colWidth: CGFloat
-    let labelWidth: CGFloat
-
-    /// 轨道分配：按跨度升序处理；若某轨道已有横线与当前线 x 区间相距 ≥10pt 可复用，否则新建
-    private struct Track { var ranges: [(ClosedRange<CGFloat>)] }
-
-    private func layout() -> (lines: [(RelationHit, CGFloat, CGFloat, CGFloat)], height: CGFloat) {
-        let drawable = RelationEngine.drawable(hits)
-        var tracks: [Track] = []
-        var result: [(RelationHit, CGFloat, CGFloat, CGFloat)] = []   // hit, x1, x2, y
-
-        for hit in drawable {
-            let x1 = labelWidth + CGFloat(hit.colA) * colWidth + colWidth / 2
-            let x2 = labelWidth + CGFloat(hit.colB) * colWidth + colWidth / 2
-            var assigned: Int? = nil
-            for (ti, track) in tracks.enumerated() {
-                let clear = track.ranges.allSatisfy { range in
-                    max(x1, x2) < range.lowerBound - 10 || min(x1, x2) > range.upperBound + 10
-                }
-                if clear { assigned = ti; break }
-            }
-            let ti: Int
-            if let a = assigned { ti = a } else { tracks.append(Track(ranges: [])); ti = tracks.count - 1 }
-            let y = CGFloat(26 + ti * 15)
-            tracks[ti].ranges.append(min(x1, x2)...max(x1, x2))
-            result.append((hit, x1, x2, y))
-        }
-        let height = CGFloat((tracks.count + 1) * 15 + 15)
-        return (result, height)
-    }
-
-    var body: some View {
-        let (lines, height) = layout()
-        ZStack(alignment: .topLeading) {
-            Canvas { context, size in
-                let top = CGFloat(0)
-
-                // ① 全部竖线（从地支字下方 4pt 起笔，落到各自轨道高度）
-                for (_, x1, x2, y) in lines {
-                    for x in [x1, x2] {
-                        var path = Path()
-                        path.move(to: CGPoint(x: x, y: top + 4))
-                        path.addLine(to: CGPoint(x: x, y: top + y))
-                        context.stroke(path, with: .color(.gray.opacity(0.25)), lineWidth: 0.8)
-                    }
-                }
-
-                // ② 横线白底（宽 3.4pt，两端缩进 2.6pt，让横线穿过竖线处断开）
-                for (_, x1, x2, y) in lines {
-                    var path = Path()
-                    path.move(to: CGPoint(x: min(x1, x2) + 2.6, y: top + y))
-                    path.addLine(to: CGPoint(x: max(x1, x2) - 2.6, y: top + y))
-                    context.stroke(path, with: .color(.white), lineWidth: 3.4)
-                }
-
-                // ③ 横线本体：颜色 = 关系类型；线型 = 命/运（改动 7-D2）
-                for (hit, x1, x2, y) in lines {
-                    var path = Path()
-                    path.move(to: CGPoint(x: min(x1, x2), y: top + y))
-                    path.addLine(to: CGPoint(x: max(x1, x2), y: top + y))
-                    let rgb = hit.kind.colorRGB
-                    let color = Color(red: rgb.r, green: rgb.g, blue: rgb.b)
-                    if hit.tier == .t1 {
-                        // 本命：实线 1.3pt
-                        context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.3))
-                    } else {
-                        // 流运/当日：虚线 5/3，opacity .8
-                        context.stroke(path, with: .color(color.opacity(0.8)),
-                                       style: StrokeStyle(lineWidth: 1.3, dash: [5, 3]))
-                    }
-                }
-            }
-            // ④ 标签：横线中点上方 3.6pt，9.5pt 同线色
-            ForEach(lines, id: \.0.id) { (hit, x1, x2, y) in
-                let rgb = hit.kind.colorRGB
-                Text(hit.kind.rawValue)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(Color(red: rgb.r, green: rgb.g, blue: rgb.b))
-                    .position(x: (x1 + x2) / 2, y: y - 3.6 + 6)   // 视觉居中于横线上方
-                    .allowsHitTesting(false)
-            }
-        }
-        .frame(height: height)
-        .frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - 大运条（改动 6-C6 / 改动 7-B3）
-
-struct DayunBarView: View {
-
-    @EnvironmentObject var app: AppModel
-
-    var body: some View {
-        let chart = app.birthChart
-        let steps = chart.map { DayunCalculator.steps(chart: $0) } ?? []
-        let currentIndex = chart.map { DayunCalculator.currentStepIndex(steps: DayunCalculator.steps(chart: $0)) } ?? nil
-
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                // 6 步均分（space-between）
-                ForEach(steps) { step in
-                    let isCurrent = currentIndex.map { steps[$0].id == step.id } ?? false
-                    VStack(spacing: 1) {
-                        Text(step.pillar.text)
-                            .font(Theme.ganzhi(13.5))
-                            .foregroundStyle(isCurrent ? Theme.accent : Theme.secondaryText.opacity(0.55))
-                        Text(isCurrent ? "当前" : (step.startYear.map { "\($0)" } ?? ""))
-                            .font(.system(size: 8))
-                            .foregroundStyle(isCurrent ? Theme.accent.opacity(0.7) : Theme.secondaryText.opacity(0.4))
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-
-            if chart != nil && (chart?.qiyunMonths == nil || chart?.birthYear == nil) {
-                Text("填写起运岁数可显示年份与当前大运")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.secondaryText.opacity(0.6))
-            }
-        }
     }
 }
 

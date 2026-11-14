@@ -1,10 +1,11 @@
 //
 //  MonthCalendarView.swift
-//  首页（改动 7-B + 设计稿改版）：大号年月标题 + 即时排盘‖个人命盘（眼睛开关+大运） + 月历 + 最近待办 + 底部录入栏
-//  改动 4（新版）：月份切换为纯上下滑手势（右上箭头已删除）；点年月标题回今天所在月份
-//  改动 5：节气名（朱砂小字）/ 法定假日（红数字+右下红点）/ 调休上班日（右上「班」角标）
-//  设计稿改版：① 大字年月两行标题 ② 即时排盘/个人命盘双栏 + 眼睛显示隐藏命盘与大运
-//              ③ 月历上移、字号放大 ④ 今日红圆底白字
+//  首页（设计稿 v4）
+//    ① 大标题：2026 年 / 11.14 SAT（Sinhala Sangam MN 数字）+ 当天重要日子（Alibaba PuHuiTi Bold）
+//    ② 右侧即时排盘：年月日时小标签（Light）+ 四柱干支 29pt（Bold）+ 两行小字（干支年月日 / 当前时刻）
+//    ③ 宜忌位改为历法原始数据：十二建除 / 二十八宿值日 / 日干支冲煞 / 神煞（不做吉凶结论）
+//    ④ 月历：单击日期 → 下方切「当天待办」；双击日期 → 进周页
+//    ⑤ 待办区：默认「最近待办」，可一键切回
 //  硬规则：首页不得出现任何刑冲合害连线或关系文字。
 //
 
@@ -50,27 +51,23 @@ struct MonthCalendarView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                MonthHeaderView()
+                // 设计稿 v4 ①②：左日期块 ‖ 右即时排盘（两栏宽度锁死）
+                HomeTopView()
                     .padding(.top, 8)
 
-                // 设计稿改版 ②：即时排盘 ‖ 个人命盘（眼睛开关）+ 大运
-                HomeBoardView()
-                    .padding(.top, 12)
+                // 设计稿 v4 ③：原「宜/忌」位置 → 历法原始数据
+                AlmanacStripView(day: app.selectedDay)
 
                 // 改动 7-B4 + 改动 4（新版）：月历网格，上滑=下一月、下滑=上一月
                 WeekdayHeader()
-                    .padding(.top, 12)
+                    .padding(.top, 22)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7),
                           spacing: 6) {
                     ForEach(weeks.flatMap { $0 }) { info in
                         if info.isPlaceholder {
                             Color.clear.frame(height: 42)
                         } else {
-                            NavigationLink(value: info.date) {
-                                DayCellView(info: info)
-                            }
-                            .buttonStyle(.plain)
-                            .simultaneousGesture(TapGesture().onEnded { app.select(info.date) })
+                            dayCell(info)
                         }
                     }
                 }
@@ -80,9 +77,9 @@ struct MonthCalendarView: View {
                 // 必须用高优先级：外层 ScrollView 会先吃掉竖直拖动
                 .highPriorityGesture(monthSwipe)
 
-                // 改动 7-B5：最近待办（此区域上下拖动仍是滚动页面）
-                RecentTodosView()
-                    .padding(.top, 12)
+                // 设计稿 v4 ⑤：最近待办 / 当天待办
+                TodoListView()
+                    .padding(.top, 16)
             }
             .padding(.horizontal, Theme.hPadding)
             .padding(.bottom, 24)
@@ -101,6 +98,23 @@ struct MonthCalendarView: View {
                 }
             }
         }
+    }
+
+    /// 日期格：单击 = 看当天待办，双击 = 进周页
+    private func dayCell(_ info: DayInfo) -> some View {
+        DayCellView(info: info)
+            .contentShape(Rectangle())
+            .gesture(
+                ExclusiveGesture(TapGesture(count: 2), TapGesture(count: 1))
+                    .onEnded { value in
+                        switch value {
+                        case .first:
+                            app.pushedDay = info.date.startOfBeijingDay
+                        case .second:
+                            app.selectForDayList(info.date)
+                        }
+                    }
+            )
     }
 
     // MARK: 改动 4（新版）：垂直拖动手势（上滑=下一月，下滑=上一月）
@@ -128,11 +142,13 @@ struct MonthCalendarView: View {
             }
     }
 
-    /// 切月：换月 → 校正选中日 → 0.2s 淡入（不做整页横移/翻卡）
+    /// 切月：换月 → 校正选中日 → 待办区回到「最近待办」→ 0.2s 淡入
     private func switchMonth(by offset: Int) {
         isSwitchingMonth = true
         monthDragOffset = 0
         app.moveMonth(by: offset)
+        // 设计稿 v4：切月后待办区自动回到「最近待办」
+        app.showRecentTodos()
 
         // 选中日若不在新月份，置为新月 1 日（避免随后推进别的月的周）
         let cal = GanzhiCalendar.calendar
@@ -197,233 +213,206 @@ struct MonthCalendarView: View {
     }
 }
 
-// MARK: - 月标题（改动 7-B1 + 改动 4 + 设计稿改版 ①：大字两行年月）
+// MARK: - 首页上半部：左日期块 ‖ 右即时排盘（设计稿 v4 ①②）
 
-struct MonthHeaderView: View {
+struct HomeTopView: View {
 
     @EnvironmentObject var app: AppModel
 
-    private var headerPillars: (year: Pillar, month: Pillar) {
-        let comps = GanzhiCalendar.calendar.dateComponents([.year, .month], from: app.visibleMonth)
-        return GanzhiCalendar.shared.monthHeaderPillars(year: comps.year ?? 2026, month: comps.month ?? 1)
-    }
+    /// 左栏占比（固定）：两栏宽度锁死，不随数字字体宽度变化而抖动
+    /// 「12.28 SAT」在 71pt Sinhala 下实测约 209.5pt，0.62 × 345 ≈ 213pt，刚好放得下
+    private let leftRatio: CGFloat = 0.62
+    private let gap: CGFloat = 8
+
+    private static let weekdayEN = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
 
     var body: some View {
-        // 改动 4（新版）：右上角不再有任何箭头/圆形按钮，顶部只留文字
-        VStack(alignment: .leading, spacing: 0) {
-            // 年月主标题：可点击回到今天所在月份（纯文字可点，无图标无下划线）
-            VStack(alignment: .leading, spacing: 0) {
-                // 年：中号
-                Text("\(yearInt) 年")
-                    .font(.system(size: 21, weight: .semibold))
-                    .letterSpacingCompat(0.5)
-                // 月：特大号粗体
-                Text("\(monthInt)月")
-                    .font(.system(size: 44, weight: .bold))
-                    .letterSpacingCompat(0.5)
-                    .padding(.top, 2)
+        GeometryReader { geo in
+            let total = geo.size.width
+            let leftW = floor((total - gap) * leftRatio)
+            let rightW = total - gap - leftW
+            HStack(alignment: .top, spacing: gap) {
+                dateColumn(width: leftW)
+                flowColumn(width: rightW)
             }
-            .contentShape(Rectangle())
-            .onTapGesture { app.goToToday() }
-
-            // 干支行
-            Text("\(headerPillars.year.text)年 · \(headerPillars.month.text)月")
-                .font(Theme.ganzhi(13))
-                .foregroundStyle(Theme.secondaryText)
-                .padding(.top, 8)
-            // 分钟级刷新只更新这一行文字（性能红线：不触发面板重算）
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                nowLine(context.date)
-            }
-            .padding(.top, 3)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 160)
     }
 
-    private var yearInt: Int {
-        GanzhiCalendar.calendar.component(.year, from: app.visibleMonth)
-    }
-    private var monthInt: Int {
-        GanzhiCalendar.calendar.component(.month, from: app.visibleMonth)
-    }
+    // MARK: 左：日期 + 重要日子
 
-    private func nowLine(_ date: Date) -> some View {
+    private func dateColumn(width: CGFloat) -> some View {
         let cal = GanzhiCalendar.calendar
-        let comps = cal.dateComponents([.hour, .minute], from: date)
-        let pillars = GanzhiCalendar.shared.fourPillars(for: date, lateZiCountsAsNextDay: true)
-        let hourBranch = ((comps.hour ?? 0) + 1) / 2 % 12
-        return Text(String(format: "%02d:%02d · %@ %@", comps.hour ?? 0, comps.minute ?? 0,
-                           pillars.hour.shichenName, GanZhiText.shichenRange[hourBranch]))
-            .font(.system(size: 12))
-            .foregroundStyle(Color(hexString: "#B4B4B4"))
-    }
-}
+        let comps = cal.dateComponents([.year, .month, .day, .weekday], from: app.selectedDay)
+        let weekday = Self.weekdayEN[((comps.weekday ?? 1) - 1) % 7]
+        let special = SpecialDayCN.day(for: app.selectedDay)
 
-// MARK: - 首页排盘区（设计稿改版 ②：即时排盘 ‖ 个人命盘，眼睛开关命盘+大运）
+        return VStack(alignment: .leading, spacing: 0) {
+            // 2026 年（数字用 Sinhala，汉字用普惠体——Sinhala 字体没有汉字字形）
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text("\(comps.year ?? 0)")
+                    .font(Theme.digit(34))
+                Text("年")
+                    .font(Theme.puhui(19))
+            }
+            .frame(width: width, alignment: .leading)
 
-/// 双栏面板的一列数据
-struct HomeBoardColumn: Identifiable {
-    let id: Int
-    let title: String
-    let titleAccent: Bool        // 「日柱」朱砂
-    let stemIndex: Int?
-    let branchIndex: Int?
-}
+            // 11.14 SAT
+            HStack(alignment: .lastTextBaseline, spacing: 5) {
+                Text("\(comps.month ?? 0).\(comps.day ?? 0)")
+                    .font(Theme.digit(71, bold: true))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(weekday)
+                    .font(Theme.digit(19))
+                    .padding(.bottom, 9)
+            }
+            .frame(width: width, alignment: .leading)
+            .padding(.top, -2)
 
-struct HomeBoardView: View {
-
-    @EnvironmentObject var app: AppModel
-    /// 眼睛开关：true = 显示个人命盘与大运（记忆到 UserDefaults）
-    @AppStorage("homeChartVisible") private var chartVisible = true
-
-    /// 即时排盘：当前时刻的 年柱(流年)/月柱(流月)/日柱(流日)/时柱(流时)
-    private var flowColumns: [HomeBoardColumn] {
-        let p = GanzhiCalendar.shared.fourPillars(for: Date(), lateZiCountsAsNextDay: app.lateZiCountsAsNextDay)
-        let items: [(String, Pillar)] = [("年柱", p.year), ("月柱", p.month), ("日柱", p.day), ("时柱", p.hour)]
-        return items.enumerated().map { i, pair in
-            HomeBoardColumn(id: i, title: pair.0, titleAccent: pair.0 == "日柱",
-                            stemIndex: pair.1.stemIndex, branchIndex: pair.1.branchIndex)
+            // 今天的重要日子（法定节假日首日 / 节气 / 纪念日）
+            if let special {
+                Text(special.text)
+                    .font(Theme.puhui(17, bold: true))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(width: width, alignment: .leading)
+                    .padding(.top, 6)
+            }
         }
+        // 「点标题回当月」保留（设计稿 v4 第 4 条）
+        .contentShape(Rectangle())
+        .onTapGesture { app.goToToday() }
     }
 
-    /// 个人命盘：本命四柱（时柱可选）
-    private var chartColumns: [HomeBoardColumn] {
-        guard let chart = app.birthChart else { return [] }
-        let items: [(String, Pillar?)] = [("年柱", chart.yearPillar), ("月柱", chart.monthPillar),
-                                          ("日柱", chart.dayPillar), ("时柱", chart.hourPillar)]
-        return items.enumerated().map { i, pair in
-            HomeBoardColumn(id: i, title: pair.0, titleAccent: pair.0 == "日柱",
-                            stemIndex: pair.1?.stemIndex, branchIndex: pair.1?.branchIndex)
-        }
-    }
+    // MARK: 右：即时排盘（此刻的年月日时四柱）
 
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 0) {
-                // 左：即时排盘
-                VStack(spacing: 0) {
-                    sectionTitle("即时排盘")
-                    boardBody(flowColumns)
-                }
-                .frame(maxWidth: .infinity)
-
-                // 右：个人命盘 + 眼睛
-                VStack(spacing: 0) {
-                    sectionTitleWithEye("个人命盘")
-                    if !chartVisible {
-                        hiddenPlaceholder
-                    } else if app.birthChart == nil {
-                        noChartGuide
-                    } else {
-                        boardBody(chartColumns)
+    private func flowColumn(width: CGFloat) -> some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let pillars = GanzhiCalendar.shared.fourPillars(for: context.date,
+                                                            lateZiCountsAsNextDay: app.lateZiCountsAsNextDay)
+            let four = [pillars.year, pillars.month, pillars.day, pillars.hour]
+            let colW = width / 4
+            VStack(alignment: .leading, spacing: 0) {
+                // 年月日时（Light 小标签）
+                HStack(spacing: 0) {
+                    ForEach(["年", "月", "日", "时"], id: \.self) { label in
+                        Text(label)
+                            .font(Theme.puhui(9.5))
+                            .foregroundStyle(Theme.secondaryText.opacity(0.85))
+                            .frame(width: colW)
                     }
                 }
-                .frame(maxWidth: .infinity)
-            }
 
-            // 大运：仅当眼睛睁开且有命盘时显示
-            if chartVisible, app.birthChart != nil {
-                DayunBarView()
-                    .padding(.top, 10)
+                // 天干行 29pt Bold
+                HStack(spacing: 0) {
+                    ForEach(Array(four.enumerated()), id: \.offset) { _, pillar in
+                        Text(pillar.stem)
+                            .font(Theme.puhui(29, bold: true))
+                            .foregroundStyle(.primary)
+                            .frame(width: colW)
+                    }
+                }
+                .padding(.top, 2)
+
+                // 地支行 29pt Bold
+                HStack(spacing: 0) {
+                    ForEach(Array(four.enumerated()), id: \.offset) { _, pillar in
+                        Text(pillar.branch)
+                            .font(Theme.puhui(29, bold: true))
+                            .foregroundStyle(.primary)
+                            .frame(width: colW)
+                    }
+                }
+
+                // 小字：干支年月日
+                Text("\(pillars.year.text)年 · \(pillars.month.text)月 \(pillars.day.text)日")
+                    .font(Theme.puhui(9))
+                    .foregroundStyle(Color(hexString: "#B4B4B4"))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 7)
+
+                // 小字：当前时刻与时辰
+                Text(timeLine(context.date, pillars: pillars))
+                    .font(Theme.puhui(9))
+                    .foregroundStyle(Color(hexString: "#B4B4B4"))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 3)
             }
         }
     }
 
-    // MARK: 区块标题（左：无眼睛；右：带眼睛开关）
+    private func pillarArray(_ p: FourPillars) -> [Pillar] { [p.year, p.month, p.day, p.hour] }
 
-    private func sectionTitle(_ text: String) -> some View {
+    private func timeLine(_ date: Date, pillars: FourPillars) -> String {
+        let cal = GanzhiCalendar.calendar
+        let comps = cal.dateComponents([.hour, .minute], from: date)
+        let hourBranch = ((comps.hour ?? 0) + 1) / 2 % 12
+        return String(format: "%02d:%02d · %@ %@", comps.hour ?? 0, comps.minute ?? 0,
+                      pillars.hour.shichenName, GanZhiText.shichenRange[hourBranch])
+    }
+}
+
+// MARK: - 历法原始数据（设计稿 v4 ③：原「宜/忌」位置）
+
+struct AlmanacStripView: View {
+
+    let day: Date
+
+    var body: some View {
+        let almanac = Almanac.day(for: day)
+        let yiji = AlmanacYiJi.day(for: day)
+        VStack(alignment: .leading, spacing: 8) {
+            // 宜 / 忌：直接展示万年历当天的原事项，不做任何推算
+            row(badgeText: "宜", color: Theme.accent, items: yiji?.yi)
+            row(badgeText: "忌", color: Color(hexString: "#3A3A3A"), items: yiji?.ji)
+
+            // 历法原始字段（建除 / 值宿 / 冲煞 / 神煞），小灰字一行
+            Text(rawLine(almanac))
+                .font(Theme.puhui(9.5))
+                .foregroundStyle(Color(hexString: "#B3AEA7"))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .padding(.leading, 33)
+                .padding(.top, 2)
+        }
+        .padding(.top, 16)
+    }
+
+    private func row(badgeText: String, color: Color, items: [String]?) -> some View {
+        HStack(alignment: .center, spacing: 9) {
+            badge(badgeText, color: color)
+            Text(listText(items))
+                .font(Theme.puhui(12.5))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// 最多取 6 项，多了加「等」
+    private func listText(_ items: [String]?) -> String {
+        guard let items, !items.isEmpty else { return "—" }
+        let shown = Array(items.prefix(6))
+        let text = shown.joined(separator: "，")
+        return items.count > shown.count ? text + "等" : text
+    }
+
+    private func rawLine(_ a: AlmanacDay) -> String {
+        "建除 \(a.jianchu)日 · \(a.xiu)宿\(a.xiuElement) · \(a.chongshaText) · 神煞 \(a.shenshaText)"
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(Color(hexString: "#5C5852"))
-            .frame(height: 20, alignment: .bottom)
-            .frame(maxWidth: .infinity)
-    }
-
-    private func sectionTitleWithEye(_ text: String) -> some View {
-        HStack(spacing: 5) {
-            Text(text)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(hexString: "#5C5852"))
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { chartVisible.toggle() }
-            } label: {
-                Image(systemName: chartVisible ? "eye" : "eye.slash")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(chartVisible ? Theme.accent : Color(hexString: "#9B9B9B"))
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(height: 20, alignment: .bottom)
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: 四柱面板（列标题 / 天干 / 地支，五行着色）
-
-    private func boardBody(_ columns: [HomeBoardColumn]) -> some View {
-        VStack(spacing: 3) {
-            HStack(spacing: 0) {
-                ForEach(columns) { col in
-                    Text(col.title)
-                        .font(.system(size: 9))
-                        .foregroundStyle(col.titleAccent ? Theme.accent : Theme.secondaryText)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            HStack(spacing: 0) {
-                ForEach(columns) { col in
-                    Text(col.stemIndex.map { GanZhiText.stems[$0] } ?? "—")
-                        .font(Theme.ganzhi(20))
-                        .foregroundStyle(elementColor(col.stemIndex, isStem: true))
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .frame(height: 25)
-            HStack(spacing: 0) {
-                ForEach(columns) { col in
-                    Text(col.branchIndex.map { GanZhiText.branches[$0] } ?? "—")
-                        .font(Theme.ganzhi(20))
-                        .foregroundStyle(elementColor(col.branchIndex, isStem: false))
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .frame(height: 25)
-        }
-        .padding(.top, 7)
-    }
-
-    private func elementColor(_ index: Int?, isStem: Bool) -> Color {
-        guard let index else { return Theme.secondaryText.opacity(0.4) }
-        return Theme.element(isStem ? WuXing.ofStem(index) : WuXing.ofBranch(index))
-    }
-
-    // MARK: 眼睛关闭时的占位（与面板同高，布局不跳动）
-
-    private var hiddenPlaceholder: some View {
-        Text("八字已隐藏")
-            .font(.system(size: 12))
-            .foregroundStyle(Theme.secondaryText.opacity(0.7))
-            .frame(maxWidth: .infinity)
-            .frame(height: 85, alignment: .center)
-    }
-
-    // MARK: 未录入八字引导
-
-    private var noChartGuide: some View {
-        VStack(spacing: 7) {
-            Text("未录入八字")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.secondaryText.opacity(0.7))
-            NavigationLink {
-                BirthChartEditorView()
-            } label: {
-                Text("去录入 ›")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.accent)
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 85, alignment: .center)
+            .font(Theme.puhui(11, bold: true))
+            .foregroundStyle(.white)
+            .frame(width: 24, height: 24)
+            .background(Circle().fill(color))
     }
 }
 
@@ -478,12 +467,12 @@ struct DayCellView: View {
         .frame(maxWidth: .infinity)
         .frame(height: 42)
         .contentShape(Rectangle())
-        // 有待办：右上 3pt 圆点（距右 12、距顶 6）
+        // 有待办：右上 3.5pt 墨灰圆点（设计稿 v4：与假日红点做颜色区分）
         .overlay(alignment: .topTrailing) {
             if info.hasPending {
                 Circle()
-                    .fill(Color(hexString: "#CFCBC4"))
-                    .frame(width: 3, height: 3)
+                    .fill(Color(hexString: "#8B867E"))
+                    .frame(width: 3.5, height: 3.5)
                     .padding(.top, 5)
                     .padding(.trailing, 12)
             }
@@ -500,7 +489,7 @@ struct DayCellView: View {
                     .padding(.trailing, 1)
             }
         }
-        // 法定放假日：右下角小红点（与右上待办圆点分居两侧，不重叠；今日红圆底时不重复标点）
+        // 法定放假日：右下角小红点（设计稿 v4：只在法定放假日标；今日红圆底时不重复标点）
         .overlay(alignment: .bottomTrailing) {
             if info.holidayType == .holiday && !isToday {
                 Circle()
@@ -518,14 +507,19 @@ struct DayCellView: View {
     }
 }
 
-// MARK: - 最近待办（改动 7-B5）
+// MARK: - 待办区（设计稿 v4 ⑤：最近待办 ⇄ 当天待办）
 
-struct RecentTodosView: View {
+struct TodoListView: View {
 
     @EnvironmentObject var store: TodoStore
     @EnvironmentObject var app: AppModel
 
-    /// 取数规则：从今天起未来若干条 + 今天之前未完成的过期项，共 4–6 条，按日期升序
+    private var dayDate: Date? {
+        if case .day(let d) = app.todoScope { return d }
+        return nil
+    }
+
+    /// 取数规则（最近待办）：从今天起未来若干条 + 今天之前未完成的过期项，共 4–6 条，按日期升序
     private var recentItems: [TodoItem] {
         let cal = GanzhiCalendar.calendar
         let today = Date().startOfBeijingDay
@@ -540,33 +534,68 @@ struct RecentTodosView: View {
         return result.sorted { $0.calendarDay < $1.calendarDay }
     }
 
+    /// 当天待办：该日全部待办（含已完成），按时间升序
+    private var dayItems: [TodoItem] {
+        guard let day = dayDate else { return [] }
+        let cal = GanzhiCalendar.calendar
+        return store.items
+            .filter { cal.isDate($0.calendarDay, inSameDayAs: day) }
+            .sorted { ($0.dueDate ?? $0.calendarDay) < ($1.dueDate ?? $1.calendarDay) }
+    }
+
+    private var items: [TodoItem] { dayDate == nil ? recentItems : dayItems }
+
+    private var title: String { dayDate == nil ? "最近待办" : "当天待办" }
+
+    private var dayTitle: String? {
+        guard let day = dayDate else { return nil }
+        let c = GanzhiCalendar.calendar.dateComponents([.month, .day, .weekday], from: day)
+        let weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        return "\(c.month ?? 0)月\(c.day ?? 0)日 \(weekdays[((c.weekday ?? 1) - 1) % 7])"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Hairline()
-            HStack(alignment: .firstTextBaseline) {
-                Text("最近待办")
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
                     .font(.system(size: 11, weight: .semibold))
                     .letterSpacingCompat(0.6)
                     .foregroundStyle(Color(hexString: "#8B867E"))
+                if let dayTitle {
+                    Text(dayTitle)
+                        .font(Theme.puhui(9.5))
+                        .foregroundStyle(Color(hexString: "#B3AEA7"))
+                }
                 Spacer()
-                Text("\(recentItems.count) 项")
+                if dayDate != nil {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { app.showRecentTodos() }
+                    } label: {
+                        Text("最近待办 ›")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text("\(items.count) 项")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.secondaryText.opacity(0.6))
             }
             .padding(.top, 12)
             .padding(.bottom, 6)
 
-            if recentItems.isEmpty {
-                Text("暂无待办，点底部「语音录入」说一句吧")
+            if items.isEmpty {
+                Text(dayDate == nil ? "暂无待办，点底部「语音录入」说一句吧" : "这一天还没有待办")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.secondaryText)
                     .padding(.vertical, 8)
             } else {
-                ForEach(recentItems) { item in
+                ForEach(items) { item in
                     Button {
                         app.route = .editTodo(item)   // 点击 → 直接打开编辑页
                     } label: {
-                        recentRow(item)
+                        row(item)
                     }
                     .buttonStyle(.plain)
                 }
@@ -574,7 +603,7 @@ struct RecentTodosView: View {
         }
     }
 
-    private func recentRow(_ item: TodoItem) -> some View {
+    private func row(_ item: TodoItem) -> some View {
         HStack(spacing: 9) {
             // 左：完成状态圆圈
             Circle()
@@ -586,14 +615,15 @@ struct RecentTodosView: View {
                 Text(item.title)
                     .font(.system(size: 12.5))
                     .foregroundStyle(item.isDone ? Theme.secondaryText : .primary)
+                    .strikethrough(item.isDone, color: Theme.secondaryText.opacity(0.6))
                     .lineLimit(1)
                 Text("\(dayText(item)) · \(GanzhiCalendar.shared.dayPillar(for: item.calendarDay).text)")
                     .font(.system(size: 9))
                     .foregroundStyle(Color(hexString: "#B3AEA7"))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            // 右：时间（等宽数字）
-            Text(item.timeText == "全天" ? "" : item.timeText)
+            // 右：节日名 + 时间（如「中秋-全天」），等宽数字
+            Text(TodoRowText.sideLabel(item))
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(Color(hexString: "#B3AEA7"))
         }

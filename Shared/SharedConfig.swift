@@ -25,6 +25,8 @@ public enum AppGroupConfig {
     public static let genderKey = "gender"
     public static let birthYearKey = "birthYear"
     public static let qiyunMonthsKey = "qiyunMonths"
+    /// 当前所处的第几步大运（0 起；用户手动指定，留空则按出生年 + 起运岁数推算）
+    public static let currentDayunKey = "currentDayunIndex"
     /// 数据文件名
     public static let todosFileName = "todos.json"
 

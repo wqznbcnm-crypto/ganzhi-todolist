@@ -31,6 +31,12 @@ targets:
         excludes:
           - "Info.plist"
       - path: Shared
+      - path: Fonts/Alibaba-PuHuiTi-Bold.otf
+        buildPhase: resources
+      - path: Fonts/Alibaba-PuHuiTi-Light.otf
+        buildPhase: resources
+      - path: Resources/AlmanacYiJi.json
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.workbuddy.ganzhitodo

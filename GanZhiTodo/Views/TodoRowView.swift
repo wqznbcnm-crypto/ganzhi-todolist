@@ -55,3 +55,17 @@ struct TodoRowView: View {
         return ReminderPreset.title(for: minutes)
     }
 }
+
+// MARK: - 待办行右侧时间位
+
+/// 设计稿 v4：把节假日在待办列表里也标出来，节日名与原时间并列，
+/// 例如「中秋-全天」「中秋-15:00」；不是节假日就只显示时间（全天则留空）。
+enum TodoRowText {
+    static func sideLabel(_ item: TodoItem) -> String {
+        let time = item.timeText
+        if let festival = SpecialDayCN.todoLabel(for: item.calendarDay) {
+            return "\(festival)-\(time)"
+        }
+        return time == "全天" ? "" : time
+    }
+}

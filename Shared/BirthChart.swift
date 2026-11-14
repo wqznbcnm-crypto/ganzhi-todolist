@@ -19,9 +19,13 @@ public struct BirthChart: Equatable {
     public var birthYear: Int?
     /// 起运月数（岁×12 + 月；nil = 未填，不显示年份与当前大运）
     public var qiyunMonths: Int?
+    /// 当前所处的大运序号（0 起，0 = 第一步）。
+    /// 用户可在录入页直接指定；nil = 按「出生年份 + 起运岁数」推算。
+    public var currentDayunIndex: Int?
 
     public init(yearPillar: Pillar, monthPillar: Pillar, dayPillar: Pillar,
-                hourPillar: Pillar?, gender: String, birthYear: Int?, qiyunMonths: Int?) {
+                hourPillar: Pillar?, gender: String, birthYear: Int?, qiyunMonths: Int?,
+                currentDayunIndex: Int? = nil) {
         self.yearPillar = yearPillar
         self.monthPillar = monthPillar
         self.dayPillar = dayPillar
@@ -29,6 +33,7 @@ public struct BirthChart: Equatable {
         self.gender = gender
         self.birthYear = birthYear
         self.qiyunMonths = qiyunMonths
+        self.currentDayunIndex = currentDayunIndex
     }
 
     /// 日柱主星显示：「元男」/「元女」
@@ -53,6 +58,8 @@ public struct BirthChart: Equatable {
         else { d.removeObject(forKey: AppGroupConfig.birthYearKey) }
         if let q = qiyunMonths { d.set(q, forKey: AppGroupConfig.qiyunMonthsKey) }
         else { d.removeObject(forKey: AppGroupConfig.qiyunMonthsKey) }
+        if let c = currentDayunIndex { d.set(c, forKey: AppGroupConfig.currentDayunKey) }
+        else { d.removeObject(forKey: AppGroupConfig.currentDayunKey) }
     }
 
     public static func load() -> BirthChart? {
@@ -64,15 +71,18 @@ public struct BirthChart: Equatable {
         let hour = pillar(d.string(forKey: AppGroupConfig.birthHourPillarKey))
         let birthYear = d.object(forKey: AppGroupConfig.birthYearKey) as? Int
         let qiyun = d.object(forKey: AppGroupConfig.qiyunMonthsKey) as? Int
+        let dayun = d.object(forKey: AppGroupConfig.currentDayunKey) as? Int
         return BirthChart(yearPillar: y, monthPillar: m, dayPillar: day,
-                          hourPillar: hour, gender: g, birthYear: birthYear, qiyunMonths: qiyun)
+                          hourPillar: hour, gender: g, birthYear: birthYear, qiyunMonths: qiyun,
+                          currentDayunIndex: dayun)
     }
 
     public static func clear() {
         let d = AppGroupConfig.sharedDefaults
         for key in [AppGroupConfig.birthYearPillarKey, AppGroupConfig.birthMonthPillarKey,
                     AppGroupConfig.birthDayPillarKey, AppGroupConfig.birthHourPillarKey,
-                    AppGroupConfig.genderKey, AppGroupConfig.birthYearKey, AppGroupConfig.qiyunMonthsKey] {
+                    AppGroupConfig.genderKey, AppGroupConfig.birthYearKey, AppGroupConfig.qiyunMonthsKey,
+                    AppGroupConfig.currentDayunKey] {
             d.removeObject(forKey: key)
         }
     }
@@ -137,5 +147,16 @@ public enum DayunCalculator {
             if year >= start && year < end { return i }
         }
         return nil
+    }
+
+    /// 当前大运序号：优先用录入页手动指定的那一步，其次按出生年份 + 起运岁数推算。
+    /// nil = 既没指定也算不出来（例如既没填出生年份，也没填起运岁数）。
+    public static func resolvedIndex(chart: BirthChart, list: [DayunStep]? = nil,
+                                     date: Date = Date()) -> Int? {
+        let all = list ?? steps(chart: chart)
+        if let manual = chart.currentDayunIndex, manual >= 0, manual < all.count {
+            return manual
+        }
+        return currentStepIndex(steps: all, date: date)
     }
 }

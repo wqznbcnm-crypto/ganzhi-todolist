@@ -25,6 +25,8 @@ struct BirthChartEditorView: View {
     @State private var birthYearText = ""
     @State private var qiyunYearsText = ""
     @State private var qiyunMonthsText = ""
+    /// 当前所处的大运（0 起）；nil = 按出生年份 + 起运岁数自动推算
+    @State private var currentDayunIndex: Int? = nil
     @State private var validationError: String? = nil
 
     var body: some View {
@@ -80,6 +82,24 @@ struct BirthChartEditorView: View {
                 Text("从任意排盘结果里抄「X 岁起运」即可；有月则填「X 岁 Y 个月」。")
             }
 
+            // 设计稿 v4：大运列显示「当前那一步」，可直接指定
+            if !previewSteps.isEmpty {
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Array(previewSteps.enumerated()), id: \.offset) { index, step in
+                                dayunChip(index: index, step: step)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Text("当前大运（选填）")
+                } footer: {
+                    Text("不选则按「出生年份 + 起运岁数」自动推算；两者都不填就无法判断，面板里的大运列会显示「—」而不是假装第一步。")
+                }
+            }
+
             if let error = validationError {
                 Section {
                     Text(error)
@@ -128,6 +148,55 @@ struct BirthChartEditorView: View {
         }
     }
 
+    // MARK: 当前大运候选
+
+    private var qiyunValue: Int? {
+        let years = Int(qiyunYearsText.trimmingCharacters(in: .whitespaces)) ?? 0
+        let months = Int(qiyunMonthsText.trimmingCharacters(in: .whitespaces)) ?? 0
+        return (years > 0 || months > 0) ? years * 12 + months : nil
+    }
+
+    /// 按当前已选的年柱/月柱/性别展开 6 步大运（填了出生年与起运岁数才有年份）
+    private var previewSteps: [DayunStep] {
+        guard let ys = yearStem, let yb = yearBranch,
+              let ms = monthStem, let mb = monthBranch else { return [] }
+        let chart = BirthChart(yearPillar: Pillar(stemIndex: ys, branchIndex: yb),
+                               monthPillar: Pillar(stemIndex: ms, branchIndex: mb),
+                               dayPillar: Pillar(sexagenaryIndex: 0),
+                               hourPillar: nil,
+                               gender: gender,
+                               birthYear: Int(birthYearText.trimmingCharacters(in: .whitespaces)),
+                               qiyunMonths: qiyunValue,
+                               currentDayunIndex: nil)
+        return DayunCalculator.steps(chart: chart)
+    }
+
+    private func dayunChip(index: Int, step: DayunStep) -> some View {
+        let selected = currentDayunIndex == index
+        return Button {
+            currentDayunIndex = selected ? nil : index   // 再点一次取消，回到自动推算
+        } label: {
+            VStack(spacing: 2) {
+                Text("第\(index + 1)步")
+                    .font(.system(size: 9))
+                    .foregroundStyle(selected ? Theme.accent : Theme.secondaryText)
+                Text(step.pillar.text)
+                    .font(Theme.ganzhi(16))
+                    .foregroundStyle(selected ? Theme.accent : .primary)
+                Text(step.startYear.map { "\($0)" } ?? "—")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.7))
+            }
+            .frame(width: 48)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(selected ? Theme.accent.opacity(0.08) : Color.primary.opacity(0.03)))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(selected ? Theme.accent.opacity(0.5) : Color.clear, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: 载入 / 保存
 
     private func loadExisting() {
@@ -145,6 +214,7 @@ struct BirthChartEditorView: View {
             qiyunYearsText = String(q / 12)
             qiyunMonthsText = String(q % 12)
         }
+        currentDayunIndex = c.currentDayunIndex
     }
 
     private func resetFields() {
@@ -155,6 +225,7 @@ struct BirthChartEditorView: View {
         hasHour = false
         gender = "男"
         birthYearText = ""; qiyunYearsText = ""; qiyunMonthsText = ""
+        currentDayunIndex = nil
         validationError = nil
     }
 
@@ -186,17 +257,15 @@ struct BirthChartEditorView: View {
         if let y = Int(birthYearText.trimmingCharacters(in: .whitespaces)), (1900...2100).contains(y) {
             birthYear = y
         }
-        var qiyun: Int? = nil
-        let years = Int(qiyunYearsText.trimmingCharacters(in: .whitespaces)) ?? 0
-        let months = Int(qiyunMonthsText.trimmingCharacters(in: .whitespaces)) ?? 0
-        if years > 0 || months > 0 { qiyun = years * 12 + months }
+        let qiyun = qiyunValue
 
         let chart = BirthChart(
             yearPillar: Pillar(stemIndex: ys, branchIndex: yb),
             monthPillar: Pillar(stemIndex: ms, branchIndex: mb),
             dayPillar: Pillar(stemIndex: ds, branchIndex: db),
             hourPillar: hs.map { Pillar(stemIndex: $0, branchIndex: hb!) },
-            gender: gender, birthYear: birthYear, qiyunMonths: qiyun
+            gender: gender, birthYear: birthYear, qiyunMonths: qiyun,
+            currentDayunIndex: currentDayunIndex
         )
         app.saveBirthChart(chart)
         validationError = nil

@@ -5,6 +5,14 @@
 
 import SwiftUI
 
+/// 首页下方待办区的两种模式（设计稿 v4）
+enum TodoScope: Equatable {
+    /// 最近待办（首页默认）
+    case recent
+    /// 单击某天后：该日待办
+    case day(Date)
+}
+
 @MainActor
 final class AppModel: ObservableObject {
 
@@ -29,6 +37,10 @@ final class AppModel: ObservableObject {
     @Published var visibleMonth: Date = Date().startOfBeijingDay
     @Published var selectedDay: Date = Date().startOfBeijingDay
     @Published var route: Route?
+    /// 首页待办区模式：最近待办 / 当天待办
+    @Published var todoScope: TodoScope = .recent
+    /// 双击日期后 push 的周页；nil = 停在首页
+    @Published var pushedDay: Date?
 
     /// 语音引擎偏好：iflytek / apple / auto
     @Published var speechEngine: String {
@@ -87,6 +99,7 @@ final class AppModel: ObservableObject {
             visibleMonth = Date().startOfBeijingDay
             selectedDay = Date().startOfBeijingDay
         }
+        todoScope = .recent
     }
 
     /// 切月（不带动画：过渡动画由月历视图统一控制，避免两层动画叠加发抖）
@@ -99,6 +112,18 @@ final class AppModel: ObservableObject {
 
     func select(_ day: Date) {
         selectedDay = day.startOfBeijingDay
+    }
+
+    /// 单击日期：选中该日，并把下方列表切到「当天待办」
+    func selectForDayList(_ day: Date) {
+        let d = day.startOfBeijingDay
+        selectedDay = d
+        todoScope = .day(d)
+    }
+
+    /// 切回「最近待办」
+    func showRecentTodos() {
+        todoScope = .recent
     }
 
     /// 处理快捷指令唤醒：若存在「立即录音」标记则打开录音页
