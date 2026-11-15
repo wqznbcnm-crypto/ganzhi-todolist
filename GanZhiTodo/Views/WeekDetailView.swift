@@ -263,6 +263,7 @@ struct WeekDetailView: View {
                 Text(item.title)
                     .font(.system(size: 12.5))
                     .foregroundStyle(item.isDone ? Theme.secondaryText : .primary)
+                    .strikethrough(TodoRowText.isStruck(item), color: Theme.secondaryText.opacity(0.75))
                     .lineLimit(1)
                 Text("\(comps.month ?? 0)/\(comps.day ?? 0) \(wd)")
                     .font(.system(size: 9))

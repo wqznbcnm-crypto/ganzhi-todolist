@@ -11,6 +11,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var notifAuthorized = false
+    @State private var pendingCount = 0
 
     private var defaultReminderProxy: Binding<Int> {
         Binding<Int>(
@@ -76,11 +77,19 @@ struct SettingsView: View {
                             Text(preset.title).tag(preset.minutes)
                         }
                     }
+                    Button("发一条测试提醒（10 秒后）") {
+                        NotificationScheduler.shared.scheduleTest(after: 10) { _ in
+                            NotificationScheduler.shared.pendingCount { count in
+                                self.pendingCount = count
+                            }
+                        }
+                    }
+                    LabeledContent("已排队的提醒", value: "\(pendingCount) 条")
                 } header: {
                     Text("待办提醒")
                 } footer: {
                     if notifAuthorized {
-                        Text("通知权限已开启")
+                        Text("通知权限已开启。设置完提醒后，把 App 退到后台，到点会弹通知。")
                     } else {
                         Button("通知权限未开启，点此去开启") {
                             if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -108,6 +117,9 @@ struct SettingsView: View {
             .onAppear {
                 NotificationScheduler.shared.currentAuthorizationStatus { status in
                     self.notifAuthorized = (status == .authorized || status == .provisional)
+                }
+                NotificationScheduler.shared.pendingCount { count in
+                    self.pendingCount = count
                 }
             }
         }

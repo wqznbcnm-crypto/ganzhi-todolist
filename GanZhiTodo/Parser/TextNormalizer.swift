@@ -20,6 +20,8 @@ public enum TextNormalizer {
         // ③ 全角 … 转换后变成三个半角点，由类中的 . 兜住。
         t = t.replacingOccurrences(of: "[，。｡、､！？；,\\.!?;~·…\"\"''「」『』（）()]", with: " ", options: .regularExpression)
         t = t.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        // 口语重复与结巴清理（2026-11-15）：只处理「连续重复」这种确定性模式，不改语义
+        t = stripStutter(t)
         // 中文数字→阿拉伯（仅限紧跟时间单位的场景，见函数注释）
         t = cnNumberToArabic(t)
         // 近形/同音误识纠错（只改错字，不猜语义）
@@ -36,6 +38,27 @@ public enum TextNormalizer {
         ("星其", "星期"), ("里拜", "礼拜"), ("题醒", "提醒"),
         ("待办事项", "待办")
     ]
+
+    /// 口语重复清理：口头禅连说、单字结巴、短词三连以上，只留一份。
+    /// 刻意保守——「拜拜/谢谢/看看」这类两字叠词（刚好出现 2 次）不会被折叠；
+    /// 只有口头禅（那个/然后/就是…）和 3 次以上的重复才处理。
+    static func stripStutter(_ s: String) -> String {
+        var t = s
+        let rules: [(pattern: String, template: String)] = [
+            // 口头禅连说：那个那个 → 那个；然后然后然后 → 然后
+            ("(那个|这个|然后|就是|所以|其实|基本上|你看|怎么说)(?:\\s*\\1)+", "$1"),
+            // 单字结巴：我我 → 我；是是是 → 是
+            ("([我你他她它就那是这])\\1+", "$1"),
+            // 短词三连以上：开会 开会 开会 → 开会（两连不动，避免误伤叠词）
+            ("([^\\s]{2,3})(?:\\s*\\1){2,}", "$1")
+        ]
+        for rule in rules {
+            guard let re = try? NSRegularExpression(pattern: rule.pattern) else { continue }
+            let range = NSRange(location: 0, length: (t as NSString).length)
+            t = re.stringByReplacingMatches(in: t, range: range, withTemplate: rule.template)
+        }
+        return t
+    }
 
     /// 中文数字→阿拉伯数字。
     /// 覆盖：一 二 两 三…九 十、十一…九十九；

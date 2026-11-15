@@ -68,4 +68,14 @@ enum TodoRowText {
         }
         return time == "全天" ? "" : time
     }
+
+    /// 已过期：未完成、且归日早于今天（设计稿 v5 第 6 条：过期的标题划一道横杠）
+    static func isOverdue(_ item: TodoItem, now: Date = Date()) -> Bool {
+        !item.isDone && item.calendarDay < now.startOfBeijingDay
+    }
+
+    /// 标题是否划横杠：已完成 或 已过期
+    static func isStruck(_ item: TodoItem, now: Date = Date()) -> Bool {
+        item.isDone || isOverdue(item, now: now)
+    }
 }

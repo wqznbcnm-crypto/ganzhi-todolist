@@ -246,23 +246,29 @@ struct HomeTopView: View {
         let comps = cal.dateComponents([.year, .month, .day, .weekday], from: app.selectedDay)
         let weekday = Self.weekdayEN[((comps.weekday ?? 1) - 1) % 7]
         let special = SpecialDayCN.day(for: app.selectedDay)
+        // 用 String 拼接而不是字符串插值 Int：插值会走 LocalizedStringKey，千位分隔符会把 2026 显示成 2,026
+        let yearText = String(comps.year ?? 0)
+        // 日历口径补零：1 月 5 日显示 01.05，与 11.14 / 12.28 同宽（Sinhala 数字等宽）
+        let dateText = String(format: "%02d.%02d", comps.month ?? 0, comps.day ?? 0)
 
         return VStack(alignment: .leading, spacing: 0) {
             // 2026 年（数字用 Sinhala，汉字用普惠体——Sinhala 字体没有汉字字形）
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("\(comps.year ?? 0)")
+                Text(yearText)
                     .font(Theme.digit(34))
+                    .contentTransition(.numericText())
                 Text("年")
                     .font(Theme.puhui(19))
             }
             .frame(width: width, alignment: .leading)
 
-            // 11.14 SAT
+            // 11.14 SAT（字号与宽度都锁死，不随日期变化缩放）
             HStack(alignment: .lastTextBaseline, spacing: 5) {
-                Text("\(comps.month ?? 0).\(comps.day ?? 0)")
+                Text(dateText)
                     .font(Theme.digit(71, bold: true))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .frame(width: 170, alignment: .leading)
+                    .contentTransition(.numericText())
                 Text(weekday)
                     .font(Theme.digit(19))
                     .padding(.bottom, 9)
@@ -280,6 +286,9 @@ struct HomeTopView: View {
                     .padding(.top, 6)
             }
         }
+        // 数字变化时的滚动动画（切月 / 点日期都会触发）
+        .animation(.easeInOut(duration: 0.22), value: dateText)
+        .animation(.easeInOut(duration: 0.22), value: yearText)
         // 「点标题回当月」保留（设计稿 v4 第 4 条）
         .contentShape(Rectangle())
         .onTapGesture { app.goToToday() }
@@ -289,7 +298,14 @@ struct HomeTopView: View {
 
     private func flowColumn(width: CGFloat) -> some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let pillars = GanzhiCalendar.shared.fourPillars(for: context.date,
+            let now = context.date
+            let hm = GanzhiCalendar.calendar.dateComponents([.hour, .minute], from: now)
+            // 年月日跟着日历里选中的那天走；时柱仍取当下时辰（设计稿 v5 第 4 条）
+            let base = GanzhiCalendar.calendar.date(bySettingHour: hm.hour ?? 0,
+                                                    minute: hm.minute ?? 0,
+                                                    second: 0,
+                                                    of: app.selectedDay) ?? app.selectedDay
+            let pillars = GanzhiCalendar.shared.fourPillars(for: base,
                                                             lateZiCountsAsNextDay: app.lateZiCountsAsNextDay)
             let four = [pillars.year, pillars.month, pillars.day, pillars.hour]
             let colW = width / 4
@@ -439,19 +455,21 @@ struct DayCellView: View {
     @EnvironmentObject var app: AppModel
     let info: DayInfo
 
-    private var isToday: Bool {
-        GanzhiCalendar.calendar.isDate(info.date, inSameDayAs: Date())
+    /// 设计稿 v5 第 5 条：把「选中的日期」当作当天显示 —— 红圆底白字跟着选中日走，
+    /// 不再固定在真实今天（点哪天，哪天就是红圆）
+    private var isSelected: Bool {
+        GanzhiCalendar.calendar.isDate(app.selectedDay, inSameDayAs: info.date)
     }
 
     var body: some View {
         VStack(spacing: 2) {
-            // 日期数字：今日 → 朱砂圆底白字（设计稿改版 ④）；法定假日 → 朱砂红
+            // 日期数字：选中日 → 朱砂圆底白字；法定假日 → 朱砂红
             Text("\(info.dayNumber)")
-                .font(.system(size: 15.5, weight: isToday ? .semibold : .medium))
-                .foregroundStyle(isToday ? Color.white : numberColor)
+                .font(.system(size: 15.5, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? Color.white : numberColor)
                 .frame(width: 27, height: 27)
                 .background(
-                    Circle().fill(isToday ? Theme.accent : Color.clear)
+                    Circle().fill(isSelected ? Theme.accent : Color.clear)
                 )
             // 下方小字：节气日显示节气名（朱砂），否则日柱
             if let term = info.termName {
@@ -489,9 +507,9 @@ struct DayCellView: View {
                     .padding(.trailing, 1)
             }
         }
-        // 法定放假日：右下角小红点（设计稿 v4：只在法定放假日标；今日红圆底时不重复标点）
+        // 法定放假日：右下角小红点（只在法定放假日标；选中日红圆底时不重复标点）
         .overlay(alignment: .bottomTrailing) {
-            if info.holidayType == .holiday && !isToday {
+            if info.holidayType == .holiday && !isSelected {
                 Circle()
                     .fill(Theme.accent)
                     .frame(width: 3, height: 3)
@@ -615,7 +633,8 @@ struct TodoListView: View {
                 Text(item.title)
                     .font(.system(size: 12.5))
                     .foregroundStyle(item.isDone ? Theme.secondaryText : .primary)
-                    .strikethrough(item.isDone, color: Theme.secondaryText.opacity(0.6))
+                    // 已完成 / 已过期 → 标题划横杠
+                    .strikethrough(TodoRowText.isStruck(item), color: Theme.secondaryText.opacity(0.75))
                     .lineLimit(1)
                 Text("\(dayText(item)) · \(GanzhiCalendar.shared.dayPillar(for: item.calendarDay).text)")
                     .font(.system(size: 9))

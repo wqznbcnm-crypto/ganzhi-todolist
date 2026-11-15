@@ -38,6 +38,8 @@ struct GanZhiTodoApp: App {
             if phase == .active {
                 // 快捷指令唤醒后（App 可能已在后台运行），补一次标记检查
                 app.consumePendingVoiceFlag()
+                // 重装/覆盖安装会清掉已排队的通知，而待办还在容器里 —— 每次回前台全量重排
+                NotificationScheduler.shared.rescheduleAll(store.items)
             }
         }
     }
