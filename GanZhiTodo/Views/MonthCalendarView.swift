@@ -220,7 +220,7 @@ struct HomeTopView: View {
     @EnvironmentObject var app: AppModel
 
     /// 左栏占比（固定）：日期放大到 44pt 后略放宽；两栏宽度仍锁死，不随数字宽度抖动
-    private let leftRatio: CGFloat = 0.44
+    private let leftRatio: CGFloat = 0.45
     private let gap: CGFloat = 8
     /// 第一行区块高度：左（年+日期）与右（标签+干支）共用，保证顶/底同时对齐
     /// 改字号后如果顶或底错开 1~3pt，只调这一个数
@@ -281,12 +281,14 @@ struct HomeTopView: View {
             // 顶到 blockH：日期直接落在区块底部，和右边地支行齐平
             Spacer(minLength: 0)
 
-            // 11.14 SAT：字号锁死 44pt、宽度锁死 104pt，不随日期变化缩放
+            // 11.14 SAT：字号锁死 44pt、宽度锁死 108pt，不随日期变化缩放
+            // 108 = 实测 "88.88"@44pt = 105.3pt + 2.7pt 余量；给 104 会把末两位截成省略号
             HStack(alignment: .lastTextBaseline, spacing: 4) {
                 Text(dateText)
                     .font(Theme.digit(44, bold: true))
                     .lineLimit(1)
-                    .frame(width: 104, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: 108, alignment: .leading)
                     .numericTextRoll()
                 Text(weekday)
                     .font(Theme.digit(13))
@@ -307,6 +309,8 @@ struct HomeTopView: View {
     private func pillarsBlock(width: CGFloat, pillars: FourPillars) -> some View {
         let four = [pillars.year, pillars.month, pillars.day, pillars.hour]
         let colW = width / 4
+        // 与左侧数字同一动画口径：任一字变化就触发
+        let key = four.map(\.text).joined()
         return VStack(alignment: .leading, spacing: 0) {
             // 年月日时（Light 小标签）—— 贴区块顶部，与左侧年份同一水平线
             HStack(spacing: 0) {
@@ -328,6 +332,7 @@ struct HomeTopView: View {
                         .font(Theme.puhui(23, bold: true))
                         .foregroundStyle(.primary)
                         .frame(width: colW)
+                        .numericTextRoll()
                 }
             }
 
@@ -338,10 +343,13 @@ struct HomeTopView: View {
                         .font(Theme.puhui(23, bold: true))
                         .foregroundStyle(.primary)
                         .frame(width: colW)
+                        .numericTextRoll()
                 }
             }
         }
         .frame(width: width, alignment: .leading)
+        // 与左侧日期数字同一条动画曲线（0.22s easeInOut）：换日期/时辰时干支一起做过渡
+        .animation(.easeInOut(duration: 0.22), value: key)
     }
 
     // MARK: 左下：今天的重要日子（与右侧小字顶部对齐，v6 第 3 条）
@@ -371,6 +379,9 @@ struct HomeTopView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .numericTextRoll()
+                .animation(.easeInOut(duration: 0.22),
+                           value: "\(pillars.year.text)\(pillars.month.text)\(pillars.day.text)")
                 .padding(.top, 9)
 
             Text(timeLine(now, pillars: pillars))
