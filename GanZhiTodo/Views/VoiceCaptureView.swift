@@ -579,17 +579,17 @@ struct VoiceCaptureView: View {
     private func reparse(from text: String) {
         if let rec = TodoParser.parseRecurring(text, now: Date(), anchor: anchor) {
             recurringPlan = rec.plan
-            applyParsed(rec.first)
+            applyParsed(rec.first, fallbackText: text)
         } else {
             recurringPlan = nil
-            applyParsed(TodoParser.parse(text, now: Date(), anchor: anchor))
+            applyParsed(TodoParser.parse(text, now: Date(), anchor: anchor), fallbackText: text)
         }
     }
 
-    private func applyParsed(_ parsed: TodoParser.ParsedTodo) {
+    private func applyParsed(_ parsed: ParsedTodo, fallbackText: String) {
         parsedHasExplicitTime = parsed.hasExplicitTime
         parsedHasExplicitDate = parsed.hasExplicitDate
-        parsedTitle = parsed.title.isEmpty ? text : parsed.title
+        parsedTitle = parsed.title.isEmpty ? fallbackText : parsed.title
         if parsedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parsedTitle = "新待办"   // 兜底：永不留白
         }
