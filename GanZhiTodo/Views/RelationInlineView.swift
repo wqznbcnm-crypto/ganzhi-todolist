@@ -103,7 +103,7 @@ struct RelationInlineView: View {
                 if payload.titles.indices.contains(i) {
                     let label = ctx.resolve(Text(payload.titles[i])
                         .font(.system(size: 8))
-                        .foregroundStyle(Color(hexString: "#B3AEA7")))
+                        .foregroundColor(Color(hexString: "#B3AEA7")))
                     ctx.draw(label, at: CGPoint(x: x, y: baseline + 18), anchor: .center)
                 }
             }
@@ -115,7 +115,7 @@ struct RelationInlineView: View {
                      with: .color(Theme.accent.opacity(0.10)))
             let targetText = ctx.resolve(Text(payload.target.char)
                 .font(Theme.ganzhi(15))
-                .foregroundStyle(Theme.accent))
+                .foregroundColor(Theme.accent))
             ctx.draw(targetText, at: CGPoint(x: tx, y: baseline), anchor: .center)
 
             // 每条关系一条虚线弧
@@ -138,13 +138,13 @@ struct RelationInlineView: View {
                 // 关系字（合/冲/刑/害）放在弧顶
                 let kindText = ctx.resolve(Text(hit.kind.rawValue)
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(color))
+                    .foregroundColor(color))
                 ctx.draw(kindText, at: CGPoint(x: midX, y: baseline - 4 - lift + 7), anchor: .center)
 
                 // 对方字
                 let otherText = ctx.resolve(Text(otherChar(hit))
                     .font(Theme.ganzhi(13))
-                    .foregroundStyle(Color.primary))
+                    .foregroundColor(Color.primary))
                 ctx.draw(otherText, at: CGPoint(x: ox, y: baseline), anchor: .center)
 
                 // 小圆点
