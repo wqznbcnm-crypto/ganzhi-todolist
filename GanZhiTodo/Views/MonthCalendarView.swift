@@ -219,9 +219,12 @@ struct HomeTopView: View {
 
     @EnvironmentObject var app: AppModel
 
-    /// 左栏占比（固定）：日期缩小后左栏收窄；两栏宽度仍锁死，不随数字字体宽度变化而抖动
-    private let leftRatio: CGFloat = 0.42
+    /// 左栏占比（固定）：日期放大到 44pt 后略放宽；两栏宽度仍锁死，不随数字宽度抖动
+    private let leftRatio: CGFloat = 0.44
     private let gap: CGFloat = 8
+    /// 第一行区块高度：左（年+日期）与右（标签+干支）共用，保证顶/底同时对齐
+    /// 改字号后如果顶或底错开 1~3pt，只调这一个数
+    private static let blockH: CGFloat = 84
 
     private static let weekdayEN = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
 
@@ -237,9 +240,10 @@ struct HomeTopView: View {
                                                   lateZi: app.lateZiCountsAsNextDay)
                 VStack(alignment: .leading, spacing: 0) {
                     // 第一行：左（xxxx年 + 日期）｜右（年月日时标签 + 四柱大字）
+                    // 设计稿红线对齐：年份顶部 = 标签行顶部；日期底部 = 地支行底部（靠同一个 blockH 撑住）
                     HStack(alignment: .top, spacing: gap) {
-                        dateColumn(width: leftW)
-                        pillarsBlock(width: rightW, pillars: pillars)
+                        dateColumn(width: leftW).frame(height: Self.blockH, alignment: .topLeading)
+                        pillarsBlock(width: rightW, pillars: pillars).frame(height: Self.blockH, alignment: .top)
                     }
                     // 第二行：重要日子与排盘下方的小字共用一行，顶部对齐（v6 第 3 条）
                     HStack(alignment: .top, spacing: gap) {
@@ -249,7 +253,7 @@ struct HomeTopView: View {
                 }
             }
         }
-        .frame(height: 128)
+        .frame(height: 142)
     }
 
     // MARK: 左上：xxxx年 + 日期（重要日子单独一行，见 specialRow）
@@ -264,29 +268,31 @@ struct HomeTopView: View {
         let dateText = String(format: "%02d.%02d", comps.month ?? 0, comps.day ?? 0)
 
         return VStack(alignment: .leading, spacing: 0) {
-            // 2026 年：数字与日期同一字体（Sinhala）；「年」字用普惠体 Bold（v6 第 2 条）
+            // 2026 年：数字与日期同一字体（Sinhala）；「年」字用普惠体 Bold
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(yearText)
-                    .font(Theme.digit(22))
+                    .font(Theme.digit(24))
                     .numericTextRoll()
                 Text("年")
-                    .font(Theme.puhui(15, bold: true))
+                    .font(Theme.puhui(16, bold: true))
             }
             .frame(width: width, alignment: .leading)
 
-            // 11.14 SAT：字号锁死 40pt、宽度锁死 96pt，不随日期变化缩放（v6 第 1 条）
+            // 顶到 blockH：日期直接落在区块底部，和右边地支行齐平
+            Spacer(minLength: 0)
+
+            // 11.14 SAT：字号锁死 44pt、宽度锁死 104pt，不随日期变化缩放
             HStack(alignment: .lastTextBaseline, spacing: 4) {
                 Text(dateText)
-                    .font(Theme.digit(40, bold: true))
+                    .font(Theme.digit(44, bold: true))
                     .lineLimit(1)
-                    .frame(width: 96, alignment: .leading)
+                    .frame(width: 104, alignment: .leading)
                     .numericTextRoll()
                 Text(weekday)
-                    .font(Theme.digit(12))
-                    .padding(.bottom, 5)
+                    .font(Theme.digit(13))
+                    .padding(.bottom, 6)
             }
             .frame(width: width, alignment: .leading)
-            .padding(.top, 1)
         }
         // 数字变化时的滚动动画（切月 / 点日期都会触发）
         .animation(.easeInOut(duration: 0.22), value: dateText)
@@ -302,32 +308,34 @@ struct HomeTopView: View {
         let four = [pillars.year, pillars.month, pillars.day, pillars.hour]
         let colW = width / 4
         return VStack(alignment: .leading, spacing: 0) {
-            // 年月日时（Light 小标签）
+            // 年月日时（Light 小标签）—— 贴区块顶部，与左侧年份同一水平线
             HStack(spacing: 0) {
                 ForEach(["年", "月", "日", "时"], id: \.self) { label in
                     Text(label)
-                        .font(Theme.puhui(9.5))
+                        .font(Theme.puhui(8.5))
                         .foregroundStyle(Theme.secondaryText.opacity(0.85))
                         .frame(width: colW)
                 }
             }
 
-            // 天干行 29pt Bold
+            // 中间留白吸收高度差，让干支两行落到底部（与左侧日期底部齐平）
+            Spacer(minLength: 0)
+
+            // 天干行 23pt Bold（整体缩到原来的 4/5）
             HStack(spacing: 0) {
                 ForEach(Array(four.enumerated()), id: \.offset) { _, pillar in
                     Text(pillar.stem)
-                        .font(Theme.puhui(29, bold: true))
+                        .font(Theme.puhui(23, bold: true))
                         .foregroundStyle(.primary)
                         .frame(width: colW)
                 }
             }
-            .padding(.top, 2)
 
-            // 地支行 29pt Bold
+            // 地支行 23pt Bold
             HStack(spacing: 0) {
                 ForEach(Array(four.enumerated()), id: \.offset) { _, pillar in
                     Text(pillar.branch)
-                        .font(Theme.puhui(29, bold: true))
+                        .font(Theme.puhui(23, bold: true))
                         .foregroundStyle(.primary)
                         .frame(width: colW)
                 }
@@ -705,7 +713,7 @@ struct TodoListView: View {
     }
 }
 
-// MARK: - 底部操作栏（改动 7-B6：常驻固定，46/23，朱砂语音按钮）
+// MARK: - 底部两个录入入口（v8：左「事迹记录」· 右「待办记录」，替换原手动记录板块）
 
 struct BottomActionBar: View {
 
@@ -715,31 +723,25 @@ struct BottomActionBar: View {
         VStack(spacing: 0) {
             Hairline()
             HStack(spacing: 10) {
+                // 左：事迹记录（已经发生的事）
                 Button {
-                    // 键盘录入：日期默认取当前选中日期
-                    app.route = .newTodo(app.selectedDay)
+                    app.route = .newEvent(anchor: app.selectedDay)
                 } label: {
-                    Label("键盘录入", systemImage: "square.and.pencil")
-                        .font(.system(size: 13.5, weight: .medium))
-                        .foregroundStyle(Color(hexString: "#3A3A3A"))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .background(RoundedRectangle(cornerRadius: 23, style: .continuous)
-                            .fill(Color.primary.opacity(0.04)))
+                    card(icon: "bookmark",
+                         title: "事迹记录",
+                         subtitle: "已经发生的事",
+                         filled: false)
                 }
                 .buttonStyle(.plain)
 
+                // 右：待办记录（未来要做的事）→ 语音录入 + 确认卡片
                 Button {
-                    // 改动 9：首页底部语音入口 anchor = 当前选中日期
                     app.route = .voice(anchor: app.selectedDay)
                 } label: {
-                    Label("语音录入", systemImage: "waveform")
-                        .font(.system(size: 13.5, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .background(RoundedRectangle(cornerRadius: 23, style: .continuous)
-                            .fill(Theme.accent))
+                    card(icon: "checklist",
+                         title: "待办记录",
+                         subtitle: "打算要做的事",
+                         filled: true)
                 }
                 .buttonStyle(.plain)
             }
@@ -748,6 +750,34 @@ struct BottomActionBar: View {
             .padding(.bottom, 6)
             .background(Color(.systemBackground))
         }
+    }
+
+    private func card(icon: String, title: String, subtitle: String, filled: Bool) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(filled ? Color.white : Theme.accent)
+                .frame(width: 26, height: 26)
+                .background(
+                    Circle().fill(filled ? Color.white.opacity(0.18) : Theme.accent.opacity(0.10))
+                )
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(filled ? Color.white : .primary)
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundStyle(filled ? Color.white.opacity(0.75) : Theme.secondaryText)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity)
+        .frame(height: 56)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(filled ? Theme.accent : Color.primary.opacity(0.04))
+        )
     }
 }
 

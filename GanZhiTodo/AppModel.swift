@@ -23,6 +23,11 @@ final class AppModel: ObservableObject {
         case newTodo(Date)
         case editTodo(TodoItem)
         case settings
+        /// v8：事迹记录录入（anchor = 发生日期默认值）
+        case newEvent(anchor: Date)
+        case editEvent(EventRecord)
+        /// v8：全部事迹记录列表
+        case eventList
 
         var id: String {
             switch self {
@@ -30,6 +35,9 @@ final class AppModel: ObservableObject {
             case .newTodo(let day): return "new-\(day.timeIntervalSince1970)"
             case .editTodo(let item): return "edit-\(item.id.uuidString)"
             case .settings: return "settings"
+            case .newEvent(let anchor): return "newevent-\(anchor.timeIntervalSince1970)"
+            case .editEvent(let e): return "editevent-\(e.id.uuidString)"
+            case .eventList: return "eventlist"
             }
         }
     }

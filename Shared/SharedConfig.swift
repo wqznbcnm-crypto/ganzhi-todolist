@@ -30,6 +30,12 @@ public enum AppGroupConfig {
     /// 数据文件名
     public static let todosFileName = "todos.json"
 
+    /// 事迹记录（v8）：与待办分开存，互不影响
+    public static let eventsFileName = "events.json"
+
+    /// 事迹回顾提醒总开关（v8）
+    public static let eventReminderEnabledKey = "eventReminderEnabled"
+
     public static var sharedDefaults: UserDefaults {
         UserDefaults(suiteName: identifier) ?? .standard
     }
@@ -40,6 +46,10 @@ public enum AppGroupConfig {
             return url
         }
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
+    public static var eventsURL: URL {
+        containerURL.appendingPathComponent(eventsFileName)
     }
 
     public static var todosURL: URL {

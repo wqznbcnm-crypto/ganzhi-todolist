@@ -111,6 +111,43 @@ public final class NotificationScheduler: NSObject, UNUserNotificationCenterDele
         for item in items where !item.isDone {
             schedule(for: item)
         }
+        // v8：事迹回顾提醒一并重排（同干支到来时提示回顾）
+        scheduleEventMatches(EventStore.shared.items)
+    }
+
+    /// 事迹回顾：给未来 N 天里「流日干支与历史事迹相同」的日子排一条 09:00 提醒。
+    /// 上限 24 条 —— iOS 单 App 待触发通知总量 64 条，要给待办提醒留位置。
+    public func scheduleEventMatches(_ records: [EventRecord], days: Int = 60, limit: Int = 24) {
+        let enabled = AppGroupConfig.sharedDefaults.object(forKey: AppGroupConfig.eventReminderEnabledKey) as? Bool ?? true
+        guard enabled, !records.isEmpty else { return }
+
+        let cal = GanzhiCalendar.calendar
+        let today = Date().startOfBeijingDay
+        var scheduled = 0
+
+        for offset in 1...days {
+            guard scheduled < limit else { break }
+            guard let day = cal.date(byAdding: .day, value: offset, to: today) else { continue }
+            let gz = GanzhiCalendar.shared.dayPillar(for: day).text
+            let hits = records.filter { $0.notifyOnMatch && EventMatcher.sameDay($0, dayGZ: gz) }
+            guard !hits.isEmpty else { continue }
+
+            let names = hits.prefix(2).map(\.title).joined(separator: "、")
+            let content = UNMutableNotificationContent()
+            content.title = "历史上干支相同的日子"
+            content.body = "过往在相同干支发生过：\(names)"
+            content.subtitle = "仅为您的个人历史笔记回顾，不代表预判、吉凶预测"
+            content.sound = .default
+            content.threadIdentifier = "event-\(gz)"
+
+            var comps = cal.dateComponents([.year, .month, .day], from: day)
+            comps.hour = 9
+            comps.minute = 0
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            let identifier = "event-\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
+            center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: trigger))
+            scheduled += 1
+        }
     }
 
     private func identifier(for id: UUID, offset: Int) -> String {

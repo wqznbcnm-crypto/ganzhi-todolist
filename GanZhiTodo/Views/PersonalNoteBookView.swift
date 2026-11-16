@@ -11,6 +11,8 @@ struct PersonalNoteBookView: View {
     @EnvironmentObject var book: PersonalNoteBook
 
     @State private var editingChar: String?
+    /// v8：批量编辑
+    @State private var showBatch = false
 
     private var stemRows: [String] { NoteCatalog.stems }
     private var branchRows: [String] { NoteCatalog.branches }
@@ -65,6 +67,15 @@ struct PersonalNoteBookView: View {
         }
         .navigationTitle("我的命理笔记")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("批量") { showBatch = true }
+                    .font(.system(size: 14))
+            }
+        }
+        .sheet(isPresented: $showBatch) {
+            BatchNoteEditView()
+        }
         .sheet(item: Binding(
             get: { editingChar.map { CharBox(char: $0) } },
             set: { editingChar = $0?.char }

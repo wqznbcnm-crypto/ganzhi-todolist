@@ -25,6 +25,9 @@ struct WeekDetailView: View {
     /// 正在编辑标签的字
     @State private var editingTagChar: String?
 
+    /// v8：事迹记录
+    @ObservedObject private var eventStore = EventStore.shared
+
     init(day: Date) {
         _selectedDay = State(initialValue: day.startOfBeijingDay)
     }
@@ -94,6 +97,11 @@ struct WeekDetailView: View {
                         .padding(.top, 14)
                         .simultaneousGesture(weekSwipe)
 
+                    // v8 ①：本周哪几天与历史事迹干支相同
+                    if !weekEventMatches.isEmpty {
+                        eventMatchSection.padding(.top, 8)
+                    }
+
                     // C3 排盘面板：即时排盘 ‖ 本人八字；点字 → 下方内联展开虚线示意（v7）
                     BaZiBoardView(data: boardData) { col, isStem in
                         toggleRelation(col: col, isStem: isStem)
@@ -111,6 +119,10 @@ struct WeekDetailView: View {
                     // 本周待办
                     weekTodoSection
                         .padding(.top, 16)
+
+                    // v8 ②：本周已经发生的事迹
+                    weekEventSection
+                        .padding(.top, 14)
                 }
                 .opacity(weekOpacity)
             }
@@ -230,10 +242,19 @@ struct WeekDetailView: View {
                         Text(GanzhiCalendar.shared.dayPillar(for: day).text)
                             .font(Theme.ganzhi(8.5))
                             .foregroundStyle(isSelected ? Theme.accent : Theme.secondaryText)
-                        // 有待办：列底 3pt 圆点
-                        Circle()
-                            .fill(pending.contains(day.startOfBeijingDay) ? Color(hexString: "#CFCBC4") : .clear)
-                            .frame(width: 3, height: 3)
+                        if matchedDays.contains(day.startOfBeijingDay) {
+                            // v8：这一天流日干支与某条历史事迹一致 → 朱砂小标（完整提示见周条下方）
+                            Text("事")
+                                .font(Theme.puhui(7.5, bold: true))
+                                .foregroundStyle(.white)
+                                .frame(width: 11, height: 11)
+                                .background(Circle().fill(Theme.accent))
+                        } else {
+                            // 有待办：列底 3pt 圆点
+                            Circle()
+                                .fill(pending.contains(day.startOfBeijingDay) ? Color(hexString: "#CFCBC4") : .clear)
+                                .frame(width: 3, height: 3)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
@@ -280,6 +301,140 @@ struct WeekDetailView: View {
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+
+    // MARK: v8 事迹匹配数据
+
+    private struct DayEventMatch: Identifiable {
+        let day: Date
+        let dayGZ: String
+        let records: [EventRecord]
+        var id: Date { day }
+    }
+
+    /// 本周每天流日干支 vs 历史事迹（按日柱比较；记录带时辰时仍按日柱标天，时辰在文案里注明）
+    private var weekEventMatches: [DayEventMatch] {
+        weekDays.compactMap { day in
+            let gz = GanzhiCalendar.shared.dayPillar(for: day).text
+            let hits = eventStore.items.filter { $0.notifyOnMatch && EventMatcher.sameDay($0, dayGZ: gz) }
+            return hits.isEmpty ? nil : DayEventMatch(day: day, dayGZ: gz, records: hits)
+        }
+    }
+
+    private var matchedDays: Set<Date> {
+        Set(weekEventMatches.map { $0.day.startOfBeijingDay })
+    }
+
+    private var weekSummary: String {
+        let wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        return "\(GanzhiCalendar.calendar.component(.day, from: weekDays[0]))日 – \(GanzhiCalendar.calendar.component(.day, from: weekDays[6]))日"
+    }
+
+    /// ① 干支匹配提醒
+    private var eventMatchSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("历史事迹匹配")
+                    .font(.system(size: 11, weight: .semibold))
+                    .letterSpacingCompat(0.6)
+                    .foregroundStyle(Theme.accent.opacity(0.85))
+                Spacer()
+                Text("同为干支")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.6))
+            }
+            .padding(.bottom, 6)
+
+            ForEach(weekEventMatches) { match in
+                VStack(alignment: .leading, spacing: 3) {
+                    let c = GanzhiCalendar.calendar.dateComponents([.month, .day, .weekday], from: match.day)
+                    let wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][((c.weekday ?? 1) - 1) % 7]
+                    Text("\(c.month ?? 0)/\(c.day ?? 0) \(wd) · \(match.dayGZ)日")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.secondaryText)
+                    ForEach(match.records) { record in
+                        Text("【历史事迹匹配】你曾在相同干支发生过：\(record.title)")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.accent.opacity(0.05)))
+                .padding(.bottom, 6)
+            }
+
+            Text("仅为您的个人历史笔记回顾，不代表预判、吉凶预测。")
+                .font(.system(size: 9.5))
+                .foregroundStyle(Theme.secondaryText.opacity(0.75))
+        }
+    }
+
+    /// ② 本周已发生的事迹
+    private var weekEventSection: some View {
+        let records = eventStore.records(from: weekDays[0], to: weekDays[6])
+        return VStack(alignment: .leading, spacing: 0) {
+            Hairline()
+            HStack(alignment: .firstTextBaseline) {
+                Text("本周事迹")
+                    .font(.system(size: 11, weight: .semibold))
+                    .letterSpacingCompat(0.6)
+                    .foregroundStyle(Color(hexString: "#8B867E"))
+                Spacer()
+                Text("\(records.count) 条")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.6))
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 6)
+
+            if records.isEmpty {
+                Text("本周还没有记录事迹")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondaryText)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(records) { record in
+                    Button {
+                        app.route = .editEvent(record)
+                    } label: {
+                        weekEventRow(record)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func weekEventRow(_ record: EventRecord) -> some View {
+        let cal = GanzhiCalendar.calendar
+        let comps = cal.dateComponents([.month, .day, .weekday], from: record.day)
+        let wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][((comps.weekday ?? 1) - 1) % 7]
+        return HStack(spacing: 9) {
+            Image(systemName: "bookmark.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(Theme.accent.opacity(0.7))
+                .frame(width: 13)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(record.title)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text("\(comps.month ?? 0)/\(comps.day ?? 0) \(wd) · \(record.pillarLine)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color(hexString: "#B3AEA7"))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 4.5)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.primary.opacity(0.04)).frame(height: 1)
         }
     }
 

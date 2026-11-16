@@ -14,6 +14,11 @@ struct SettingsView: View {
     @State private var notifAuthorized = false
     @State private var pendingCount = 0
 
+    /// v8：事迹记录
+    @ObservedObject private var eventStore = EventStore.shared
+    @State private var eventReminderEnabled: Bool =
+        (AppGroupConfig.sharedDefaults.object(forKey: AppGroupConfig.eventReminderEnabledKey) as? Bool) ?? true
+
     private var defaultReminderProxy: Binding<Int> {
         Binding<Int>(
             get: { app.defaultReminder ?? -1 },
@@ -117,6 +122,30 @@ struct SettingsView: View {
                     Text("个人命理笔记")
                 } footer: {
                     Text("按天干/地支记录你自己的宜做、忌做标签（如见朋友、谈生意、争吵）。启用后，遇到对应干支的日子/流月/流年，首页宜忌区优先显示你的内容，替代万年历宜忌。\n\n仅作个人记录，与历法吉凶判定无关。")
+                }
+
+                Section {
+                    Button {
+                        app.route = .eventList
+                    } label: {
+                        HStack {
+                            Text("全部事迹记录")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(eventStore.items.isEmpty ? "暂无" : "\(eventStore.items.count) 条")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Toggle("同干支回顾提醒", isOn: $eventReminderEnabled)
+                        .onChangeCompat(of: eventReminderEnabled) { value in
+                            AppGroupConfig.sharedDefaults.set(value, forKey: AppGroupConfig.eventReminderEnabledKey)
+                            NotificationScheduler.shared.rescheduleAll(TodoStore.shared.items)
+                        }
+                } header: {
+                    Text("事迹记录")
+                } footer: {
+                    Text("记录已经发生的事（例：摔跤磕碰），绑定当天的干支；之后日历走到相同干支时会提醒你回顾。关掉总开关只是不再提醒，记录仍保留。\n\n仅为您的个人历史笔记回顾，不代表预判、吉凶预测。")
                 }
 
                 Section {

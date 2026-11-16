@@ -35,6 +35,12 @@ struct RootView: View {
                     TodoEditorView(item: item)
                 case .settings:
                     SettingsView()
+                case .newEvent(let anchor):
+                    EventCaptureView(anchor: anchor)
+                case .editEvent(let record):
+                    EventCaptureView(anchor: record.occurredAt, editing: record)
+                case .eventList:
+                    EventListView()
                 }
             }
         }
