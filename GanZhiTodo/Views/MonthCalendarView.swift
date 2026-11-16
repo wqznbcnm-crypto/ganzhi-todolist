@@ -219,9 +219,8 @@ struct HomeTopView: View {
 
     @EnvironmentObject var app: AppModel
 
-    /// 左栏占比（固定）：两栏宽度锁死，不随数字字体宽度变化而抖动
-    /// 「12.28 SAT」在 71pt Sinhala 下实测约 209.5pt，0.62 × 345 ≈ 213pt，刚好放得下
-    private let leftRatio: CGFloat = 0.62
+    /// 左栏占比（固定）：日期缩小后左栏收窄；两栏宽度仍锁死，不随数字字体宽度变化而抖动
+    private let leftRatio: CGFloat = 0.42
     private let gap: CGFloat = 8
 
     private static let weekdayEN = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
@@ -231,60 +230,63 @@ struct HomeTopView: View {
             let total = geo.size.width
             let leftW = floor((total - gap) * leftRatio)
             let rightW = total - gap - leftW
-            HStack(alignment: .top, spacing: gap) {
-                dateColumn(width: leftW)
-                flowColumn(width: rightW)
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                let now = context.date
+                let pillars = Self.currentPillars(now: now,
+                                                  selected: app.selectedDay,
+                                                  lateZi: app.lateZiCountsAsNextDay)
+                VStack(alignment: .leading, spacing: 0) {
+                    // 第一行：左（xxxx年 + 日期）｜右（年月日时标签 + 四柱大字）
+                    HStack(alignment: .top, spacing: gap) {
+                        dateColumn(width: leftW)
+                        pillarsBlock(width: rightW, pillars: pillars)
+                    }
+                    // 第二行：重要日子与排盘下方的小字共用一行，顶部对齐（v6 第 3 条）
+                    HStack(alignment: .top, spacing: gap) {
+                        specialRow(width: leftW)
+                        smallBlock(width: rightW, now: now, pillars: pillars)
+                    }
+                }
             }
         }
-        .frame(height: 160)
+        .frame(height: 128)
     }
 
-    // MARK: 左：日期 + 重要日子
+    // MARK: 左上：xxxx年 + 日期（重要日子单独一行，见 specialRow）
 
     private func dateColumn(width: CGFloat) -> some View {
         let cal = GanzhiCalendar.calendar
         let comps = cal.dateComponents([.year, .month, .day, .weekday], from: app.selectedDay)
         let weekday = Self.weekdayEN[((comps.weekday ?? 1) - 1) % 7]
-        let special = SpecialDayCN.day(for: app.selectedDay)
         // 用 String 拼接而不是字符串插值 Int：插值会走 LocalizedStringKey，千位分隔符会把 2026 显示成 2,026
         let yearText = String(comps.year ?? 0)
         // 日历口径补零：1 月 5 日显示 01.05，与 11.14 / 12.28 同宽（Sinhala 数字等宽）
         let dateText = String(format: "%02d.%02d", comps.month ?? 0, comps.day ?? 0)
 
         return VStack(alignment: .leading, spacing: 0) {
-            // 2026 年（数字用 Sinhala，汉字用普惠体——Sinhala 字体没有汉字字形）
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
+            // 2026 年：数字与日期同一字体（Sinhala）；「年」字用普惠体 Bold（v6 第 2 条）
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(yearText)
-                    .font(Theme.digit(34))
+                    .font(Theme.digit(22))
                     .contentTransition(.numericText())
                 Text("年")
-                    .font(Theme.puhui(19))
+                    .font(Theme.puhui(15, bold: true))
             }
             .frame(width: width, alignment: .leading)
 
-            // 11.14 SAT（字号与宽度都锁死，不随日期变化缩放）
-            HStack(alignment: .lastTextBaseline, spacing: 5) {
+            // 11.14 SAT：字号锁死 40pt、宽度锁死 96pt，不随日期变化缩放（v6 第 1 条）
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
                 Text(dateText)
-                    .font(Theme.digit(71, bold: true))
+                    .font(Theme.digit(40, bold: true))
                     .lineLimit(1)
-                    .frame(width: 170, alignment: .leading)
+                    .frame(width: 96, alignment: .leading)
                     .contentTransition(.numericText())
                 Text(weekday)
-                    .font(Theme.digit(19))
-                    .padding(.bottom, 9)
+                    .font(Theme.digit(12))
+                    .padding(.bottom, 5)
             }
             .frame(width: width, alignment: .leading)
-            .padding(.top, -2)
-
-            // 今天的重要日子（法定节假日首日 / 节气 / 纪念日）
-            if let special {
-                Text(special.text)
-                    .font(Theme.puhui(17, bold: true))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(width: width, alignment: .leading)
-                    .padding(.top, 6)
-            }
+            .padding(.top, 1)
         }
         // 数字变化时的滚动动画（切月 / 点日期都会触发）
         .animation(.easeInOut(duration: 0.22), value: dateText)
@@ -294,76 +296,96 @@ struct HomeTopView: View {
         .onTapGesture { app.goToToday() }
     }
 
-    // MARK: 右：即时排盘（此刻的年月日时四柱）
+    // MARK: 右上：即时排盘四柱（年月日跟选中日，时柱取当下时辰）
 
-    private func flowColumn(width: CGFloat) -> some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
-            let now = context.date
-            let hm = GanzhiCalendar.calendar.dateComponents([.hour, .minute], from: now)
-            // 年月日跟着日历里选中的那天走；时柱仍取当下时辰（设计稿 v5 第 4 条）
-            let base = GanzhiCalendar.calendar.date(bySettingHour: hm.hour ?? 0,
-                                                    minute: hm.minute ?? 0,
-                                                    second: 0,
-                                                    of: app.selectedDay) ?? app.selectedDay
-            let pillars = GanzhiCalendar.shared.fourPillars(for: base,
-                                                            lateZiCountsAsNextDay: app.lateZiCountsAsNextDay)
-            let four = [pillars.year, pillars.month, pillars.day, pillars.hour]
-            let colW = width / 4
-            VStack(alignment: .leading, spacing: 0) {
-                // 年月日时（Light 小标签）
-                HStack(spacing: 0) {
-                    ForEach(["年", "月", "日", "时"], id: \.self) { label in
-                        Text(label)
-                            .font(Theme.puhui(9.5))
-                            .foregroundStyle(Theme.secondaryText.opacity(0.85))
-                            .frame(width: colW)
-                    }
+    private func pillarsBlock(width: CGFloat, pillars: FourPillars) -> some View {
+        let four = [pillars.year, pillars.month, pillars.day, pillars.hour]
+        let colW = width / 4
+        return VStack(alignment: .leading, spacing: 0) {
+            // 年月日时（Light 小标签）
+            HStack(spacing: 0) {
+                ForEach(["年", "月", "日", "时"], id: \.self) { label in
+                    Text(label)
+                        .font(Theme.puhui(9.5))
+                        .foregroundStyle(Theme.secondaryText.opacity(0.85))
+                        .frame(width: colW)
                 }
+            }
 
-                // 天干行 29pt Bold
-                HStack(spacing: 0) {
-                    ForEach(Array(four.enumerated()), id: \.offset) { _, pillar in
-                        Text(pillar.stem)
-                            .font(Theme.puhui(29, bold: true))
-                            .foregroundStyle(.primary)
-                            .frame(width: colW)
-                    }
+            // 天干行 29pt Bold
+            HStack(spacing: 0) {
+                ForEach(Array(four.enumerated()), id: \.offset) { _, pillar in
+                    Text(pillar.stem)
+                        .font(Theme.puhui(29, bold: true))
+                        .foregroundStyle(.primary)
+                        .frame(width: colW)
                 }
-                .padding(.top, 2)
+            }
+            .padding(.top, 2)
 
-                // 地支行 29pt Bold
-                HStack(spacing: 0) {
-                    ForEach(Array(four.enumerated()), id: \.offset) { _, pillar in
-                        Text(pillar.branch)
-                            .font(Theme.puhui(29, bold: true))
-                            .foregroundStyle(.primary)
-                            .frame(width: colW)
-                    }
+            // 地支行 29pt Bold
+            HStack(spacing: 0) {
+                ForEach(Array(four.enumerated()), id: \.offset) { _, pillar in
+                    Text(pillar.branch)
+                        .font(Theme.puhui(29, bold: true))
+                        .foregroundStyle(.primary)
+                        .frame(width: colW)
                 }
-
-                // 小字：干支年月日
-                Text("\(pillars.year.text)年 · \(pillars.month.text)月 \(pillars.day.text)日")
-                    .font(Theme.puhui(9))
-                    .foregroundStyle(Color(hexString: "#B4B4B4"))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 7)
-
-                // 小字：当前时刻与时辰
-                Text(timeLine(context.date, pillars: pillars))
-                    .font(Theme.puhui(9))
-                    .foregroundStyle(Color(hexString: "#B4B4B4"))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 3)
             }
         }
+        .frame(width: width, alignment: .leading)
     }
 
-    private func pillarArray(_ p: FourPillars) -> [Pillar] { [p.year, p.month, p.day, p.hour] }
+    // MARK: 左下：今天的重要日子（与右侧小字顶部对齐，v6 第 3 条）
 
+    private func specialRow(width: CGFloat) -> some View {
+        Group {
+            if let special = SpecialDayCN.day(for: app.selectedDay) {
+                Text(special.text)
+                    .font(Theme.puhui(18, bold: true))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            } else {
+                Color.clear.frame(height: 1)
+            }
+        }
+        .frame(width: width, alignment: .leading)
+        .padding(.top, 9)
+    }
+
+    // MARK: 右下：小字两行（干支年月日 + 时刻时辰）
+
+    private func smallBlock(width: CGFloat, now: Date, pillars: FourPillars) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("\(pillars.year.text)年 · \(pillars.month.text)月 \(pillars.day.text)日")
+                .font(Theme.puhui(9))
+                .foregroundStyle(Color(hexString: "#B4B4B4"))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 9)
+
+            Text(timeLine(now, pillars: pillars))
+                .font(Theme.puhui(9))
+                .foregroundStyle(Color(hexString: "#B4B4B4"))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 3)
+        }
+        .frame(width: width, alignment: .leading)
+    }
+
+    /// 年月日跟日历里选中的那天走；时柱仍取当下时辰（v5 第 4 条）
+    private static func currentPillars(now: Date, selected: Date, lateZi: Bool) -> FourPillars {
+        let cal = GanzhiCalendar.calendar
+        let hm = cal.dateComponents([.hour, .minute], from: now)
+        let base = cal.date(bySettingHour: hm.hour ?? 0,
+                            minute: hm.minute ?? 0,
+                            second: 0,
+                            of: selected) ?? selected
+        return GanzhiCalendar.shared.fourPillars(for: base, lateZiCountsAsNextDay: lateZi)
+    }
     private func timeLine(_ date: Date, pillars: FourPillars) -> String {
         let cal = GanzhiCalendar.calendar
         let comps = cal.dateComponents([.hour, .minute], from: date)
@@ -377,24 +399,45 @@ struct HomeTopView: View {
 
 struct AlmanacStripView: View {
 
+    @EnvironmentObject var app: AppModel
+    @EnvironmentObject var noteBook: PersonalNoteBook
+
     let day: Date
 
     var body: some View {
         let almanac = Almanac.day(for: day)
         let yiji = AlmanacYiJi.day(for: day)
-        VStack(alignment: .leading, spacing: 8) {
-            // 宜 / 忌：直接展示万年历当天的原事项，不做任何推算
-            row(badgeText: "宜", color: Theme.accent, items: yiji?.yi)
-            row(badgeText: "忌", color: Color(hexString: "#3A3A3A"), items: yiji?.ji)
+        let hit = noteBook.hit(for: day, lateZi: app.lateZiCountsAsNextDay)
 
-            // 历法原始字段（建除 / 值宿 / 冲煞 / 神煞），小灰字一行
-            Text(rawLine(almanac))
-                .font(Theme.puhui(9.5))
-                .foregroundStyle(Color(hexString: "#B3AEA7"))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .padding(.leading, 33)
-                .padding(.top, 2)
+        VStack(alignment: .leading, spacing: 8) {
+            if let hit {
+                // v7：命中个人命理笔记 → 优先展示用户自定义标签，万年历宜忌原文隐藏
+                if !hit.note.yi.isEmpty {
+                    row(badgeText: "宜", color: Theme.accent, items: hit.note.yi)
+                }
+                if !hit.note.ji.isEmpty {
+                    row(badgeText: "忌", color: Color(hexString: "#3A3A3A"), items: hit.note.ji)
+                }
+                Text("个人笔记 · \(hit.scope) \(hit.char) · 万年历内容已隐藏")
+                    .font(Theme.puhui(9.5))
+                    .foregroundStyle(Color(hexString: "#B3AEA7"))
+                    .lineLimit(1)
+                    .padding(.leading, 33)
+                    .padding(.top, 2)
+            } else {
+                // 宜 / 忌：直接展示万年历当天的原事项，不做任何推算
+                row(badgeText: "宜", color: Theme.accent, items: yiji?.yi)
+                row(badgeText: "忌", color: Color(hexString: "#3A3A3A"), items: yiji?.ji)
+
+                // 历法原始字段（建除 / 值宿 / 冲煞 / 神煞），小灰字一行
+                Text(rawLine(almanac))
+                    .font(Theme.puhui(9.5))
+                    .foregroundStyle(Color(hexString: "#B3AEA7"))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .padding(.leading, 33)
+                    .padding(.top, 2)
+            }
         }
         .padding(.top, 16)
     }
@@ -610,12 +653,15 @@ struct TodoListView: View {
                     .padding(.vertical, 8)
             } else {
                 ForEach(items) { item in
-                    Button {
-                        app.route = .editTodo(item)   // 点击 → 直接打开编辑页
-                    } label: {
-                        row(item)
+                    // v6 第 4 条：左滑露出删除按钮，确认后删除
+                    SwipeToDeleteRow(onDelete: { store.delete(item) }) {
+                        Button {
+                            app.route = .editTodo(item)   // 点击 → 直接打开编辑页
+                        } label: {
+                            row(item)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }

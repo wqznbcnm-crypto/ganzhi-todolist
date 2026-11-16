@@ -11,6 +11,7 @@ struct GanZhiTodoApp: App {
 
     @StateObject private var store = TodoStore.shared
     @StateObject private var app = AppModel()
+    @StateObject private var noteBook = PersonalNoteBook.shared
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -24,6 +25,7 @@ struct GanZhiTodoApp: App {
             RootView()
                 .environmentObject(store)
                 .environmentObject(app)
+                .environmentObject(noteBook)
                 .tint(Theme.accent)
                 // 强制中文环境：无论系统语言是什么，界面与日期控件都用中文
                 .environment(\.locale, Locale(identifier: "zh_CN"))

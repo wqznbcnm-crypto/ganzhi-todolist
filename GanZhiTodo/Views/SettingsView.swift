@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsView: View {
 
     @EnvironmentObject var app: AppModel
+    @EnvironmentObject var noteBook: PersonalNoteBook
     @Environment(\.dismiss) private var dismiss
 
     @State private var notifAuthorized = false
@@ -97,6 +98,32 @@ struct SettingsView: View {
                             }
                         }
                     }
+                }
+
+                Section {
+                    NavigationLink {
+                        PersonalNoteBookView()
+                    } label: {
+                        HStack {
+                            Text("我的命理笔记")
+                            Spacer()
+                            Text(noteBook.filledCount > 0 ? "\(noteBook.filledCount) 个字已填写" : "未填写")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Toggle("启用个人命理笔记", isOn: $noteBook.enabled)
+                } header: {
+                    Text("个人命理笔记")
+                } footer: {
+                    Text("按天干/地支记录你自己的宜做、忌做标签（如见朋友、谈生意、争吵）。启用后，遇到对应干支的日子/流月/流年，首页宜忌区优先显示你的内容，替代万年历宜忌。\n\n仅作个人记录，与历法吉凶判定无关。")
+                }
+
+                Section {
+                } header: {
+                    Text("宜忌内容说明")
+                } footer: {
+                    Text(NoteCatalog.disclaimer)
                 }
 
                 Section {

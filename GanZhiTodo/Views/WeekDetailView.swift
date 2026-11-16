@@ -20,8 +20,10 @@ struct WeekDetailView: View {
     @State private var selectedDay: Date
     /// 切周过渡：只用 0.18s 淡入淡出，不做整页横移
     @State private var weekOpacity: Double = 1
-    /// 点字后的关系弹层
-    @State private var relationPayload: RelationPayload?
+    /// 点中的字（v7：向下内联展开虚线示意，不再弹窗）
+    @State private var activeTarget: RelationTarget?
+    /// 正在编辑标签的字
+    @State private var editingTagChar: String?
 
     init(day: Date) {
         _selectedDay = State(initialValue: day.startOfBeijingDay)
@@ -92,11 +94,19 @@ struct WeekDetailView: View {
                         .padding(.top, 14)
                         .simultaneousGesture(weekSwipe)
 
-                    // C3 排盘面板：即时排盘 ‖ 本人八字；点字出关系弹层
+                    // C3 排盘面板：即时排盘 ‖ 本人八字；点字 → 下方内联展开虚线示意（v7）
                     BaZiBoardView(data: boardData) { col, isStem in
-                        openRelation(col: col, isStem: isStem)
+                        toggleRelation(col: col, isStem: isStem)
                     }
                     .padding(.top, 14)
+
+                    if let payload = inlinePayload {
+                        RelationInlineView(payload: payload) { char in
+                            editingTagChar = char
+                        }
+                        .padding(.top, 10)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
 
                     // 本周待办
                     weekTodoSection
@@ -112,9 +122,19 @@ struct WeekDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .enableInteractivePopGesture()
-        .sheet(item: $relationPayload) { payload in
-            RelationSheetView(payload: payload)
+        .animation(.easeInOut(duration: 0.18), value: activeTarget)
+        .sheet(item: Binding(
+            get: { editingTagChar.map { TagCharBox(char: $0) } },
+            set: { editingTagChar = $0?.char }
+        )) { box in
+            PersonalNoteEditorView(char: box.char)
         }
+    }
+
+    /// sheet(item:) 用的包装
+    private struct TagCharBox: Identifiable {
+        let char: String
+        var id: String { char }
     }
 
     private var monthText: String {
@@ -122,20 +142,30 @@ struct WeekDetailView: View {
         return "\(comps.month ?? 0)月"
     }
 
-    // MARK: 点字 → 关系弹层
+    // MARK: 点字 → 内联展开（再点同一个字收起）
 
-    private func openRelation(col: Int, isStem: Bool) {
+    private func toggleRelation(col: Int, isStem: Bool) {
         let data = boardData
         let stemsText: [String?] = data.stems.map { $0.map { GanZhiText.stems[$0] } }
         let branchesText: [String?] = data.branches.map { $0.map { GanZhiText.branches[$0] } }
-        let raw = isStem ? stemsText[col] : branchesText[col]
-        guard let char = raw else { return }
+        guard let char = (isStem ? stemsText[col] : branchesText[col]) else { return }
+        let target = RelationTarget(col: col, isStem: isStem, char: char)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            activeTarget = (activeTarget == target) ? nil : target
+        }
+    }
 
-        relationPayload = RelationPayload(target: RelationTarget(col: col, isStem: isStem, char: char),
-                                          hits: data.relationHits,
-                                          titles: BaZiBoardData.titles,
-                                          stems: stemsText,
-                                          branches: branchesText)
+    /// 展开区所需数据（关系在展开时按当前面板算一次）
+    private var inlinePayload: RelationPayload? {
+        guard let target = activeTarget else { return nil }
+        let data = boardData
+        let stemsText: [String?] = data.stems.map { $0.map { GanZhiText.stems[$0] } }
+        let branchesText: [String?] = data.branches.map { $0.map { GanZhiText.branches[$0] } }
+        return RelationPayload(target: target,
+                               hits: data.relationHits,
+                               titles: BaZiBoardData.titles,
+                               stems: stemsText,
+                               branches: branchesText)
     }
 
     // MARK: 改动 7-F5：左右滑切周（左滑=下一周，右滑=上一周）
@@ -160,6 +190,7 @@ struct WeekDetailView: View {
         guard year >= 1900, year <= 2100 else { return }
 
         selectedDay = next
+        activeTarget = nil
         // 跨月切周后返回首页，首页要停在该周所属月份
         app.visibleMonth = next.startOfBeijingDay
 
@@ -183,8 +214,11 @@ struct WeekDetailView: View {
             ForEach(Array(weekDays.enumerated()), id: \.offset) { index, day in
                 let isSelected = cal.isDate(day, inSameDayAs: selectedDay)
                 Button {
-                    // 原地切换：不 push、不弹层
-                    withAnimation(.easeInOut(duration: 0.15)) { selectedDay = day }
+                    // 原地切换：不 push、不弹层；换天收起展开区
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        selectedDay = day
+                        activeTarget = nil
+                    }
                 } label: {
                     VStack(spacing: 3) {
                         Text(weekdayLabels[index])

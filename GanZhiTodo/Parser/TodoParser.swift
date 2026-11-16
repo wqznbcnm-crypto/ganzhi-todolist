@@ -342,6 +342,162 @@ public enum TodoParser {
                           hasExplicitDate: hasExplicitDate)
     }
 
+    // MARK: 重复口令 → 一句话建多条（v6 第 6 条）
+
+    /// 识别「每月/每个周/每年」口令后，一次生成未来各期的落地计划
+    public struct RecurringPlan {
+        public enum Kind: Equatable {
+            case monthly(day: Int)
+            case weekly(weekday: Int)              // Calendar 口径：1=周日 … 7=周六
+            case yearly(month: Int, day: Int)
+        }
+        public let kind: Kind
+        public let dates: [Date]                   // 未来各期（未说时刻 → 每期 09:00）
+        public let label: String                   // 卡片展示：「每月 14 号」
+    }
+
+    /// 输入应为归一化后的文本（与 parse 相同口径）。
+    /// 命中重复口令 → 返回计划 + 第一期的 ParsedTodo（含标题清洗、提前提醒量、明说时刻）；
+    /// 未命中 → 返回 nil，调用方回退到普通单条 parse。
+    public static func parseRecurring(_ rawText: String, now: Date = Date(), anchor: Date? = nil)
+        -> (plan: RecurringPlan, first: ParsedTodo)? {
+
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ns = text as NSString
+        let cal = GanzhiCalendar.calendar
+        let base = anchor ?? now
+
+        // 命中的口令短语（后续从标题里剔除）与期数生成器
+        var plan: RecurringPlan? = nil
+        var hitRange: NSRange? = nil
+
+        // 每年 3 月 5 号（先试，避免「月」误吞）
+        if let hit = firstHit(#"每[个]?[\s,，。、~·]*年[\s,，。、~·]*([0-9]{1,2}|[一二三四五六七八九十]{1,3})[\s,，。、~·]*月[\s,，。、~·]*([0-9]{1,2}|[一二三四五六七八九十]{1,3})[\s,，。、~·]*[日号]?"#, in: ns),
+           let m = intValue(hit.groups[1] ?? ""), let d = intValue(hit.groups[2] ?? ""),
+           (1...12).contains(m), (1...31).contains(d) {
+            let dates = yearlyDates(month: m, day: d, base: base, count: 3)
+            if !dates.isEmpty {
+                plan = RecurringPlan(kind: .yearly(month: m, day: d), dates: dates,
+                                     label: "每年 \(m) 月 \(d) 号")
+                hitRange = hit.range
+            }
+        }
+
+        // 每个月（的）14 号 / 每月 14 号
+        if plan == nil,
+           let hit = firstHit(#"每[个]?[\s,，。、~·]*月[\s,，。、~·]*的?[\s,，。、~·]*([0-9]{1,2}|[一二两三四五六七八九十]{1,3})[\s,，。、~·]*[日号]"#, in: ns),
+           let d = intValue(hit.groups[1] ?? ""), (1...31).contains(d) {
+            let dates = monthlyDates(day: d, base: base, count: 12)
+            if !dates.isEmpty {
+                plan = RecurringPlan(kind: .monthly(day: d), dates: dates,
+                                     label: "每月 \(d) 号")
+                hitRange = hit.range
+            }
+        }
+
+        // 每周三 / 每个星期天 / 每礼拜五
+        if plan == nil,
+           let hit = firstHit(#"每[个]?[\s,，。、~·]*(?:周|星期|礼拜)[\s,，。、~·]*([一二三四五六日天])"#, in: ns),
+           let ch = hit.groups[1], let idx = weekdayIndex(ch) {
+            // weekdayIndex：周一=0…周日=6 → Calendar weekday：1=周日…7=周六
+            let weekday = idx == 6 ? 1 : idx + 2
+            let names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+            let dates = weeklyDates(weekday: weekday, base: base, count: 8)
+            if !dates.isEmpty {
+                plan = RecurringPlan(kind: .weekly(weekday: weekday), dates: dates,
+                                     label: "每\(names[idx])")
+                hitRange = hit.range
+            }
+        }
+
+        guard let plan, let hitRange else { return nil }
+
+        // 口令短语之外的部分交给普通解析：提取明说时刻、提前提醒量、清洗标题
+        var remainder = remove(text, ranges: [hitRange])
+        // 口令后常见的引导词不进标题：要/需要/记得（要）/提醒我
+        while let r = firstHit(#"^[\s,，。、~·]*(记得要|记得|提醒我|需要|要)"#, in: remainder as NSString) {
+            remainder = remove(remainder, ranges: [r.range])
+        }
+        let inner = parse(remainder, now: now, anchor: anchor)
+
+        var title = inner.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty { title = "新待办" }
+
+        // 明说了时刻 → 每一期都带上该时刻；否则各期 09:00（全天口径）
+        var dates = plan.dates
+        if inner.hasExplicitTime, let due = inner.dueDate {
+            let hc = cal.dateComponents([.hour, .minute], from: due)
+            dates = dates.map { date in
+                var dc = cal.dateComponents([.year, .month, .day], from: date)
+                dc.hour = hc.hour; dc.minute = hc.minute
+                dc.timeZone = GanzhiCalendar.beijing
+                return cal.date(from: dc) ?? date
+            }
+        }
+
+        var first = inner
+        first.title = title
+        first.dueDate = dates.first
+        first.hasExplicitDate = true
+        first.originalText = rawText
+        return (RecurringPlan(kind: plan.kind, dates: dates, label: plan.label), first)
+    }
+
+    /// 未来 count 期「每月 d 号」；当月已过该日 → 从下月开始；大小月缺该日（如 2 月 30）跳过
+    static func monthlyDates(day: Int, base: Date, count: Int) -> [Date] {
+        let cal = GanzhiCalendar.calendar
+        var out: [Date] = []
+        var comps = cal.dateComponents([.year, .month], from: base)
+        let today = cal.startOfDay(for: base)
+        for _ in 0..<36 {
+            var dc = DateComponents(year: comps.year, month: comps.month, day: day, hour: 9, minute: 0)
+            dc.timeZone = GanzhiCalendar.beijing
+            if let date = cal.date(from: dc),
+               cal.component(.day, from: date) == day,
+               cal.startOfDay(for: date) >= today {
+                out.append(date)
+                if out.count == count { break }
+            }
+            comps.month? += 1
+            if (comps.month ?? 1) > 12 { comps.month = 1; comps.year? += 1 }
+        }
+        return out
+    }
+
+    /// 未来 count 期「每周 X」；今天就是该周几 → 含今天
+    static func weeklyDates(weekday: Int, base: Date, count: Int) -> [Date] {
+        let cal = GanzhiCalendar.calendar
+        let baseWeekday = cal.component(.weekday, from: base)
+        let delta = (weekday - baseWeekday + 7) % 7
+        var out: [Date] = []
+        for k in 0..<count {
+            var dc = DateComponents(day: delta + 7 * k, hour: 9, minute: 0)
+            dc.timeZone = GanzhiCalendar.beijing
+            let day = cal.startOfDay(for: base)
+            if let date = cal.date(byAdding: dc, to: day) { out.append(date) }
+        }
+        return out
+    }
+
+    /// 未来 count 期「每年 X 月 Y 号」；今年已过 → 从明年起；不存在日期（2/30）跳过
+    static func yearlyDates(month: Int, day: Int, base: Date, count: Int) -> [Date] {
+        let cal = GanzhiCalendar.calendar
+        var out: [Date] = []
+        let year0 = cal.component(.year, from: base)
+        let today = cal.startOfDay(for: base)
+        for y in year0..<(year0 + 8) {
+            var dc = DateComponents(year: y, month: month, day: day, hour: 9, minute: 0)
+            dc.timeZone = GanzhiCalendar.beijing
+            if let date = cal.date(from: dc),
+               cal.component(.day, from: date) == day,
+               cal.startOfDay(for: date) >= today {
+                out.append(date)
+                if out.count == count { break }
+            }
+        }
+        return out
+    }
+
     // MARK: 辅助
 
     static func applyPeriod(_ period: String, to hour: Int) -> Int {

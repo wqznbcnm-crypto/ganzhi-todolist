@@ -11,6 +11,9 @@ import UIKit
 
 struct VoiceCaptureView: View {
 
+    /// 「重录」按钮的灰色（v6 第 5 条；保存为朱砂红 Theme.accent）
+    private static let reRecordGray = Color(hexString: "#8B867E")
+
     @EnvironmentObject var store: TodoStore
     @EnvironmentObject var app: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -46,6 +49,8 @@ struct VoiceCaptureView: View {
     @State private var dateFromPage = false
     /// 改动 8：防连点产生两张卡片的令牌（每次 finalize 校验）
     @State private var parseToken = UUID()
+    /// v6 第 6 条：重复口令命中时的多期计划（nil = 普通单条）
+    @State private var recurringPlan: TodoParser.RecurringPlan? = nil
     /// 改动 8：识别原文可点编辑 / 长按查看原始未归一化文本
     @State private var editingOriginal = false
     @State private var originalDraft = ""
@@ -242,6 +247,30 @@ struct VoiceCaptureView: View {
             }
             .padding(.vertical, 10)
 
+            // v6 第 6 条：重复口令命中 → 提示将批量创建的各期
+            if let plan = recurringPlan {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.stack.3d.up")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                        Text("\(plan.label) · 共 \(plan.dates.count) 条")
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                    }
+                    Text(previewDates(plan.dates))
+                        .font(.system(size: 10.5).monospacedDigit())
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.softFill))
+            }
+
             Divider().overlay(Theme.secondaryText.opacity(0.18))
 
             // 第二行：时间（点击弹出系统 DatePicker；无时间→「未设具体时间」灰字可点选；
@@ -282,6 +311,7 @@ struct VoiceCaptureView: View {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 hasDue = false
                                 showDatePicker = false
+                                recurringPlan = nil   // 手动清掉时间 = 放弃批量计划
                             }
                         } label: {
                             Text("清除")
@@ -310,6 +340,8 @@ struct VoiceCaptureView: View {
                             dateFromPage = false          // 用户手动改了日期：不再是本页兜底
                             parsedHasExplicitDate = true
                             parsedHasExplicitTime = true
+                            // 手动改日期只对单条生效：批量计划按「只建这一条」处理
+                            recurringPlan = nil
                         }
                 }
             }
@@ -439,7 +471,7 @@ struct VoiceCaptureView: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 52)
-                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color.primary))
+                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Self.reRecordGray))
                 }
                 .buttonStyle(.plain)
             } else {
@@ -448,8 +480,9 @@ struct VoiceCaptureView: View {
                 } label: {
                     Text("重录")
                         .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 52)
-                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Theme.softFill))
+                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Self.reRecordGray))
                 }
                 .buttonStyle(.plain)
 
@@ -460,7 +493,7 @@ struct VoiceCaptureView: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 52)
-                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color.primary))
+                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Theme.accent))
                 }
                 .buttonStyle(.plain)
                 .disabled(parsedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -542,8 +575,18 @@ struct VoiceCaptureView: View {
 
     /// 用（归一化后的）文本重跑解析并刷新卡片三项；确认卡片唯一落库入口不变。
     /// 改动 9：解析以 anchor 为上下文；无日期时兜底 = anchor + 9h（anchor 非今天才有本页兜底）
+    /// v6 第 6 条：先试重复口令（每月/每周/每年）→ 命中则带出多期计划
     private func reparse(from text: String) {
-        let parsed = TodoParser.parse(text, now: Date(), anchor: anchor)
+        if let rec = TodoParser.parseRecurring(text, now: Date(), anchor: anchor) {
+            recurringPlan = rec.plan
+            applyParsed(rec.first)
+        } else {
+            recurringPlan = nil
+            applyParsed(TodoParser.parse(text, now: Date(), anchor: anchor))
+        }
+    }
+
+    private func applyParsed(_ parsed: TodoParser.ParsedTodo) {
         parsedHasExplicitTime = parsed.hasExplicitTime
         parsedHasExplicitDate = parsed.hasExplicitDate
         parsedTitle = parsed.title.isEmpty ? text : parsed.title
@@ -587,6 +630,7 @@ struct VoiceCaptureView: View {
         transcript = ""
         parsedTitle = ""
         reminderMinutes = nil
+        recurringPlan = nil
         parsedHasExplicitTime = true
         parsedHasExplicitDate = true
         dateFromPage = false
@@ -602,12 +646,49 @@ struct VoiceCaptureView: View {
         let trimmed = parsedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }   // 转写为空/未填标题：不产生待办
         let offsets = dueIsPast ? [] : (reminderMinutes.map { [$0] } ?? [])
+
+        // v6 第 6 条：重复口令 → 每期各建一条（标题/提醒一致；明说时刻则每期带上该时刻）
+        if let plan = recurringPlan, !plan.dates.isEmpty {
+            let cal = GanzhiCalendar.calendar
+            let hc = hasDue ? cal.dateComponents([.hour, .minute], from: dueDate) : nil
+            for date in plan.dates {
+                let final: Date
+                if let hc {
+                    var dc = cal.dateComponents([.year, .month, .day], from: date)
+                    dc.hour = hc.hour; dc.minute = hc.minute
+                    dc.timeZone = GanzhiCalendar.beijing
+                    final = cal.date(from: dc) ?? date
+                } else {
+                    final = date
+                }
+                // 提前提醒只对第一期按「已过期不提醒」判断；其余各期都在未来
+                let itemOffsets = (date == plan.dates[0]) ? offsets
+                    : (reminderMinutes.map { [$0] } ?? [])
+                store.add(TodoItem(title: trimmed, dueDate: final,
+                                   reminderOffsets: itemOffsets, allDay: !hasDue))
+            }
+            dismiss()
+            return
+        }
+
         let item = TodoItem(title: trimmed,
                             dueDate: hasDue ? dueDate : nil,
                             reminderOffsets: offsets,
                             allDay: !hasDue)
         store.add(item)
         dismiss()
+    }
+
+    /// 批量计划的日期预览：前 4 期 + 「等 N 期」
+    private func previewDates(_ dates: [Date]) -> String {
+        let cal = GanzhiCalendar.calendar
+        let shown = dates.prefix(4).map { d in
+            let c = cal.dateComponents([.month, .day], from: d)
+            return "\(c.month ?? 0)月\(c.day ?? 0)日"
+        }
+        var s = shown.joined(separator: "、")
+        if dates.count > shown.count { s += " 等共 \(dates.count) 期" }
+        return s
     }
 
     private func teardown() {
