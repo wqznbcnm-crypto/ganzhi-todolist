@@ -137,7 +137,7 @@ struct VoiceCaptureView: View {
                 .font(.system(size: 32, weight: .light))
                 .foregroundStyle(.white)
         }
-        .onChange(of: phase) { _, newPhase in
+        .onChangeCompat(of: phase) { newPhase in
             if case .listening = newPhase {
                 withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
                     pulsing = true
@@ -335,7 +335,7 @@ struct VoiceCaptureView: View {
                 if showDatePicker {
                     DatePicker("", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
                         .labelsHidden()
-                        .onChange(of: dueDate) { _, _ in
+                        .onChangeCompat(of: dueDate) { _ in
                             hasDue = true
                             dateFromPage = false          // 用户手动改了日期：不再是本页兜底
                             parsedHasExplicitDate = true

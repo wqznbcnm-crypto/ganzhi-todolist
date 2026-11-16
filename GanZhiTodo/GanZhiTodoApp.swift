@@ -36,7 +36,7 @@ struct GanZhiTodoApp: App {
                     }
                 }
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onChangeCompat(of: scenePhase) { phase in
             if phase == .active {
                 // 快捷指令唤醒后（App 可能已在后台运行），补一次标记检查
                 app.consumePendingVoiceFlag()

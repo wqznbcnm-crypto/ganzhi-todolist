@@ -268,7 +268,7 @@ struct HomeTopView: View {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(yearText)
                     .font(Theme.digit(22))
-                    .contentTransition(.numericText())
+                    .numericTextRoll()
                 Text("年")
                     .font(Theme.puhui(15, bold: true))
             }
@@ -280,7 +280,7 @@ struct HomeTopView: View {
                     .font(Theme.digit(40, bold: true))
                     .lineLimit(1)
                     .frame(width: 96, alignment: .leading)
-                    .contentTransition(.numericText())
+                    .numericTextRoll()
                 Text(weekday)
                     .font(Theme.digit(12))
                     .padding(.bottom, 5)

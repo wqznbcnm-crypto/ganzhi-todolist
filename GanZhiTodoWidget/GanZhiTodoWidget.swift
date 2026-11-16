@@ -73,10 +73,17 @@ struct GanZhiTodoWidget: Widget {
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: Provider()) { entry in
-            GanZhiTodoWidgetView(entry: entry)
-                .containerBackground(for: .widget) {
-                    Color(.systemBackground)
-                }
+            // iOS 17 用 containerBackground（系统会接管边距与底色）；
+            // iOS 16 没有这个 API，退化为普通 background
+            if #available(iOS 17.0, *) {
+                GanZhiTodoWidgetView(entry: entry)
+                    .containerBackground(for: .widget) {
+                        Color(.systemBackground)
+                    }
+            } else {
+                GanZhiTodoWidgetView(entry: entry)
+                    .background(Color(.systemBackground))
+            }
         }
         .configurationDisplayName("干支日历")
         .description("当月日历、今日四柱与待办")
